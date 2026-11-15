@@ -16,8 +16,18 @@ pub const ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="64
 
 /// Shows the tray icon and keeps its menu's check marks up to date.
 pub fn install(app: App) {
+    // Whether any note is a ghost, set only when that changes (the menu
+    // isn't made again for every other change of a note).
+    let any_ghost = signal(false);
+    effect(move || {
+        let now = app.notes.with(|notes| notes.iter().any(|n| n.meta.with(|m| m.ghost)));
+        if any_ghost.get_untracked() != now {
+            any_ghost.set(now);
+        }
+    });
     effect(move || {
         let shown = app.settings.with(|s| s.notes_shown);
+        let ghosts = any_ghost.get();
         set_tray(
             tray()
                 .icon(ImageSrc::svg_markup(ICON_SVG))
@@ -30,6 +40,11 @@ pub fn install(app: App) {
                     }),
                     MenuItem::new("Show All").checked(shown).on_select(move || app.show_all()),
                     MenuItem::new("Hide All").on_select(move || app.update_settings(|s| s.notes_shown = false)),
+                    MenuItem::new("Make Ghost Notes Solid").disabled(!ghosts).on_select(move || {
+                        for note in app.notes.get_untracked() {
+                            app.update(&note, |m| m.ghost = false);
+                        }
+                    }),
                     MenuItem::separator(),
                     MenuItem::new("Notes Manager").on_select(move || app.manager_open.set(true)),
                     MenuItem::new("Options…").on_select(move || app.options_open.set(true)),

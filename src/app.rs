@@ -94,6 +94,9 @@ pub struct App {
     /// Something asked of a note's desktop window (its note's id, what).
     /// The window takes it and sets this back to `None`.
     pub command: Signal<Option<(Rc<str>, NoteCommand)>>,
+    /// Ctrl+Alt is held: ghost notes take clicks for the while, so they
+    /// can be moved, edited or made solid again.
+    pub ghosts_solid: Signal<bool>,
     /// The last thing that went wrong, for whoever shows it.
     pub problem: Signal<Option<String>>,
     /// The owner the app's signals and tasks live under.
@@ -127,6 +130,7 @@ impl App {
             options_open: signal(false),
             dragging: signal(None),
             command: signal(None),
+            ghosts_solid: signal(false),
             problem: signal(None),
             owner: Owner::current(),
             index_dirty: signal(false),

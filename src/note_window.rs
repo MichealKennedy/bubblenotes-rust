@@ -13,7 +13,7 @@ use nsh_core::prelude::*;
 use crate::app::{App, Note, NoteCommand};
 use crate::model::{Look, NoteMeta, Rect, Rgb};
 use crate::ui::TextLook;
-use crate::{bubble, drag, editor_view, layout, note_menu};
+use crate::{bubble, drag, editor_view, layout, note_menu, win};
 
 /// The title bar's height, and a rolled-up note's.
 pub const TITLE_HEIGHT: f32 = 30.0;
@@ -25,6 +25,13 @@ const MIN_HEIGHT: f32 = 90.0;
 /// `rgb` with `alpha` (0 to 1).
 pub fn color(rgb: Rgb, alpha: f32) -> Color {
     Color((rgb << 8) | (alpha.clamp(0.0, 1.0) * 255.0).round() as u32)
+}
+
+/// The window's title: the note's, then (unseen) its id, so the window can
+/// be told from another note's of the same name (`win::set_click_through`
+/// finds it by its title).
+fn window_title(meta: &NoteMeta) -> String {
+    format!("{}\u{2063}{}", meta.title, meta.id)
 }
 
 /// The window's id for a note.
@@ -102,7 +109,7 @@ pub fn note_window(app: App, note: Note) -> Window {
     let start = shape_rect(&meta.get_untracked(), false);
     window()
         .id(window_id(&note.id))
-        .title(move || meta.with(|m| m.title.clone()))
+        .title(move || meta.with(|m| window_title(m)))
         .default_size(size(px(start.w), px(start.h)))
         .default_position(WindowPosition::At(point(px(start.x), px(start.y))))
         .attributes(move || meta.with(|m| attributes(&m.look, !m.locked && !m.rolled_up && (!m.bubble.enabled || bubble_open.get()))))
@@ -138,6 +145,27 @@ pub fn note_window(app: App, note: Note) -> Window {
                             m.rect.h = now.h.max(MIN_HEIGHT);
                         }
                     }
+                });
+            });
+
+            // A ghost note lets clicks through (unless Ctrl+Alt is held).
+            // NSH sets the window's styles again whenever its attributes
+            // change, so this runs after every change of the note, a
+            // moment later (when NSH is done).
+            let ghostly = stored(false);
+            effect(move || {
+                let ghost = meta.with(|m| m.ghost) && !app.ghosts_solid.get();
+                if !ghost && !ghostly.get() {
+                    return;
+                }
+                app.owner.run(|| {
+                    let _ = set_timeout(std::time::Duration::from_millis(200), move || {
+                        let title = meta.with_untracked(window_title);
+                        let ghost = meta.with_untracked(|m| m.ghost) && !app.ghosts_solid.get_untracked();
+                        if win::set_click_through(&title, ghost) {
+                            ghostly.replace(ghost);
+                        }
+                    });
                 });
             });
 

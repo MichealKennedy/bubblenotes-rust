@@ -13,6 +13,10 @@ Floating notes for the Windows desktop, built with [NSH](https://nsh.dev), in Ru
 - **Tray icon:** click to show or hide all notes; right-click for New Note, Show All, Hide All, Notes Manager, Options, Exit
 - **Rich text:** type `/` for headings, checklists, toggles, tables and more; select text to format it; Markdown shortcuts as you type
 - **Images and YouTube:** paste or drop images into a note; a pasted YouTube link becomes a card that opens the video in your browser
+- **Links between notes:** type `[[` to pick a note (or `[[Name]]` in full); the link shows the note's current title and opens it on a click
+- **Bubble badges:** a bubble shows the time to its note's alarm, or how many checklist items are done
+- **Snapping and rescue:** dragged notes snap to screen edges and to each other; notes left on an unplugged monitor come back
+- **Ghost notes:** a ghost note lets clicks through to what's under it; hold Ctrl+Alt to reach it again
 - **Global shortcuts:** new note (Ctrl+Alt+N), new note from the clipboard (Ctrl+Alt+V), show or hide all notes (Ctrl+Alt+H); change them in Options
 
 ## Where notes are kept
@@ -45,7 +49,8 @@ For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets 
 | `alarms.rs`, `system.rs` | Sleep and alarms; global shortcuts and starting with Windows |
 | `editor_view.rs`, `media.rs` | A note's text as an editor element; pasted images and YouTube cards |
 | `kit.rs`, `actions.rs`, `toggle.rs`, `slash.rs`, `formats.rs`, `ui.rs` | The editor: schema and plugins, the action catalog, toggle blocks, the slash menu, Markdown/HTML, toolbar and menus |
-| `drag.rs`, `win.rs` | Moving windows by hand; the few things asked of Windows directly |
+| `links.rs` | Links between notes: the `[[` menu and the link in the text |
+| `drag.rs`, `layout.rs`, `win.rs` | Moving windows by hand; snapping and off-screen rescue; the few things asked of Windows directly |
 
 ## Things worth knowing
 
@@ -54,4 +59,5 @@ For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets 
 - **Notes are dragged by the app, not the system** (`drag.rs`): a system drag region swallows clicks, and this way double-click rolls a note up and the configuration panel follows along
 - **One editor session per note**, shown by both the floating note and the manager, so they always agree
 - **No video inside notes:** NSH 0.5.1's web view draws only in the main window, so YouTube links open in the browser
+- **Ghost notes go around NSH:** it refuses click-through windows to Rust apps, so `win.rs` sets the window style itself and sets it again after NSH resets it
 - **Right-click menus are native**: a drawn menu would be clipped by a small note's window

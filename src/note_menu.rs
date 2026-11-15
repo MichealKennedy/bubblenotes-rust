@@ -64,6 +64,7 @@ enum Action {
     AlwaysOnTop,
     ShowTitle,
     Lock,
+    Ghost,
     Bubble,
     Duplicate,
     CopyNote,
@@ -163,6 +164,7 @@ fn entries(s: &MenuState) -> Vec<Entry> {
         item("Always On Top", Action::AlwaysOnTop).checked(m.look.always_on_top),
         item("Show Title", Action::ShowTitle).checked(m.look.show_title),
         item("Lock Note", Action::Lock).checked(m.locked),
+        item("Ghost (clicks pass through)", Action::Ghost).checked(m.ghost),
         item("Show as Bubble", Action::Bubble).checked(m.bubble.enabled),
         Entry::Separator,
         item("Duplicate Note", Action::Duplicate).shortcut("mod+d"),
@@ -320,6 +322,7 @@ fn perform(app: App, note: &Note, action: Action) {
         Action::AlwaysOnTop => app.update(note, |m| m.look.always_on_top = !m.look.always_on_top),
         Action::ShowTitle => app.update(note, |m| m.look.show_title = !m.look.show_title),
         Action::Lock => app.update(note, |m| m.locked = !m.locked),
+        Action::Ghost => app.update(note, |m| m.ghost = !m.ghost),
         Action::Bubble => app.update(note, |m| {
             m.bubble.enabled = !m.bubble.enabled;
             // The bubble appears where the note is.
@@ -750,6 +753,7 @@ mod tests {
                 "[ ] Always On Top",
                 "[x] Show Title",
                 "[ ] Lock Note",
+                "[ ] Ghost (clicks pass through)",
                 "[ ] Show as Bubble",
                 "---",
                 "Duplicate Note",
@@ -779,7 +783,7 @@ mod tests {
         assert_eq!(labels(sub(&menu, "Arrange")), ["Cascade all notes", "Tile all notes", "Stack here", "Snap to nearest corner"]);
         // The shortcut is valid: `MenuItem::shortcut` would panic otherwise.
         let run: Rc<dyn Fn(Action)> = Rc::new(|_| {});
-        assert_eq!(to_menu(menu, &run).len(), 28);
+        assert_eq!(to_menu(menu, &run).len(), 29);
     }
 
     #[test]

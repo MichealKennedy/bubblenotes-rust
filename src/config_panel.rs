@@ -365,7 +365,7 @@ pub(crate) fn theme_swatches(app: App, current: impl Fn() -> Look + 'static, app
 
 fn behaviour_part(app: App, note: Note) -> impl IntoElement {
     let meta = note.meta;
-    let (n1, n2, n3) = (note.clone(), note.clone(), note.clone());
+    let (n1, n2, n3, n4) = (note.clone(), note.clone(), note.clone(), note.clone());
     view()
         .gap(px(2.0))
         .pb(px(8.0))
@@ -373,6 +373,12 @@ fn behaviour_part(app: App, note: Note) -> impl IntoElement {
         .child(switch_row("Always on top", move || meta.with(|m| m.look.always_on_top), move |on| app.update(&n1, |m| m.look.always_on_top = on)))
         .child(switch_row("Lock note", move || meta.with(|m| m.locked), move |on| app.update(&n2, |m| m.locked = on)))
         .child(switch_row("Rolled up", move || meta.with(|m| m.rolled_up), move |on| app.update(&n3, |m| m.rolled_up = on)))
+        .child(switch_row("Ghost: clicks pass through", move || meta.with(|m| m.ghost), move |on| app.update(&n4, |m| m.ghost = on)))
+        .child(
+            text("Hold Ctrl+Alt to reach a ghost note.")
+                .text_size(px(11.0))
+                .text_color(move || nsh_base::theme().muted_foreground),
+        )
 }
 
 fn background_part(app: App, note: Note) -> impl IntoElement {
@@ -442,7 +448,7 @@ fn title_part(app: App, note: Note) -> impl IntoElement {
 
 fn text_part(app: App, note: Note) -> impl IntoElement {
     let meta = note.meta;
-    let (n1, n2, n3) = (note.clone(), note.clone(), note.clone());
+    let (n1, n2, n3, n4) = (note.clone(), note.clone(), note.clone(), note.clone());
     let mut fonts = vec![("", "Default")];
     fonts.extend(FONTS.iter().map(|f| (*f, *f)));
     view()

@@ -21,7 +21,9 @@
 //! - `editor_view`: a note's text as an editor element; `media`: pasted images, YouTube cards
 //! - `kit`, `actions`, `toggle`, `slash`, `formats`, `ui`: the editor itself
 //!   (schema, actions, toggles, slash menu, file formats, menus' look)
-//! - `drag`, `win`: moving windows by hand; what's asked of Windows directly
+//! - `links`: links between notes
+//! - `drag`, `layout`, `win`: moving windows by hand; snapping and rescue;
+//!   what's asked of Windows directly
 
 // NSH's `spawn` hands back a handle that's also a future; dropping it
 // doesn't cancel the task (it runs under its owner until done), which is
@@ -73,6 +75,14 @@ pub fn BubbleNotes() -> impl IntoElement {
     system::install(app);
     effect(move || drag::set_snap(app.settings.with(|s| s.snap_to_edges)));
     effect(move || app.rescue_notes());
+    // Holding Ctrl+Alt makes ghost notes solid for the while.
+    let _ = set_interval(std::time::Duration::from_millis(120), move || {
+        let any = app.notes.with_untracked(|notes| notes.iter().any(|n| n.meta.with_untracked(|m| m.ghost)));
+        let held = any && win::ctrl_alt_down();
+        if app.ghosts_solid.get_untracked() != held {
+            app.ghosts_solid.set(held);
+        }
+    });
     // For development: BUBBLENOTES_OPEN=manager,options,config opens those
     // windows at start.
     if let Ok(open) = std::env::var("BUBBLENOTES_OPEN") {
@@ -82,7 +92,7 @@ pub fn BubbleNotes() -> impl IntoElement {
             app.config_for.set(app.notes.with_untracked(|n| n.first().map(|n| n.id.clone())));
         }
     }
-    // For development: BUBBLENOTES_DEV=select|slash|back|autosize does that
+    // For development: BUBBLENOTES_DEV=select|slash|back|autosize|unghost does that
     // to the first note on the desktop two seconds after start.
     if let Ok(dev) = std::env::var("BUBBLENOTES_DEV") {
         let _ = set_timeout(std::time::Duration::from_secs(2), move || {
@@ -98,6 +108,11 @@ pub fn BubbleNotes() -> impl IntoElement {
                 }
                 "back" => app.command.set(Some((note.id.clone(), app::NoteCommand::SendToBack))),
                 "autosize" => app.command.set(Some((note.id.clone(), app::NoteCommand::AutoSize))),
+                "unghost" => {
+                    for note in app.notes.get_untracked() {
+                        app.update(&note, |m| m.ghost = false);
+                    }
+                }
                 _ => {}
             }
         });

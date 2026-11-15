@@ -202,6 +202,9 @@ pub struct NoteMeta {
     pub rolled_up: bool,
     /// The text can't be edited and the note can't be moved.
     pub locked: bool,
+    /// Clicks go through the note to what's under it (it can only be
+    /// looked at), until Ctrl+Alt is held.
+    pub ghost: bool,
     pub look: Look,
     pub bubble: Bubble,
     /// Hidden until then (milliseconds since the Unix epoch).
@@ -224,6 +227,7 @@ impl Default for NoteMeta {
             rect: Rect::default(),
             rolled_up: false,
             locked: false,
+            ghost: false,
             look: Look::default(),
             bubble: Bubble::default(),
             sleep_until: None,
