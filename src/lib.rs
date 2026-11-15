@@ -120,6 +120,14 @@ pub fn BubbleNotes() -> impl IntoElement {
                 "back" => app.command.set(Some((note.id.clone(), app::NoteCommand::SendToBack))),
                 // "config": the note's configuration panel, as its menu opens it.
                 "config" => app.config_for.set(Some(note.id.clone())),
+                // "configs": the panel opened, shut, opened again, then
+                // moved to the next note, two seconds apart.
+                "configs" => {
+                    let ids = [Some(note.id.clone()), None, Some(note.id.clone()), notes.get(1).map(|n| n.id.clone())];
+                    for (i, id) in ids.into_iter().enumerate() {
+                        let _ = set_timeout(std::time::Duration::from_secs(2 * i as u64), move || app.config_for.set(id.clone()));
+                    }
+                }
                 "autosize" => app.command.set(Some((note.id.clone(), app::NoteCommand::AutoSize))),
                 // "newin:Work/Ideas": a new note in that category.
                 dev if dev.starts_with("newin:") => {

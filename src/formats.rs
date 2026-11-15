@@ -74,11 +74,8 @@ const HARD_SPACE: char = '\u{a0}';
 /// block. So, as browsers do for editable text, a space HTML would drop is
 /// written as a no-break space (the first of a block, the last, and every
 /// second one of a run), and reading turns no-break spaces back into
-/// spaces. Code keeps its spaces in HTML as it is, and is left alone.
+/// spaces. A code block keeps its spaces in HTML as it is, and is left alone.
 fn spaces(doc: &Node, hard: bool) -> Node {
-    fn is_code(text: &Value) -> bool {
-        text.get("marks").and_then(Value::as_array).is_some_and(|marks| marks.iter().any(|m| m.get("type").and_then(Value::as_str) == Some("code")))
-    }
     fn walk(value: &mut Value, hard: bool) {
         if value.get("type").and_then(Value::as_str) == Some("codeBlock") {
             return;
@@ -105,11 +102,6 @@ fn spaces(doc: &Node, hard: bool) -> Node {
                 if dropped && hard {
                     end_hard(children, last_text);
                 }
-                last_text = None;
-                continue;
-            }
-            if is_code(&children[i]) {
-                dropped = false;
                 last_text = None;
                 continue;
             }
@@ -517,7 +509,8 @@ mod tests {
                     { "type": "paragraph", "content": [{ "type": "text", "text": " two  three   end " }] },
                     { "type": "paragraph", "content": [
                         { "type": "text", "text": "bold ", "marks": [{ "type": "bold" }] },
-                        { "type": "text", "text": " plain" },
+                        { "type": "text", "text": " plain " },
+                        { "type": "text", "text": "x  y", "marks": [{ "type": "code" }] },
                     ] },
                     { "type": "codeBlock", "content": [{ "type": "text", "text": "a  b" }] },
                 ],
@@ -526,10 +519,10 @@ mod tests {
         let html = html_fragment(&doc).unwrap();
         // No two spaces in a row, none at a paragraph's start or end.
         assert!(!html.contains("  <") && !html.contains("> ") && !html.contains(" </p>"), "{html}");
-        assert!(html.contains("a  b"), "code keeps its spaces: {html}");
+        assert!(html.contains("a  b"), "a code block keeps its spaces: {html}");
         let back = Format::Html.parse(&schema, &html).unwrap();
         assert_eq!(back.child(0).text_content(), " two  three   end ");
-        assert_eq!(back.child(1).text_content(), "bold  plain");
+        assert_eq!(back.child(1).text_content(), "bold  plain x  y");
         assert_eq!(back.child(2).text_content(), "a  b");
     }
 }
