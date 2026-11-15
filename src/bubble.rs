@@ -366,6 +366,7 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
                 (m.bubble.x - r.x, m.bubble.y - r.y)
             });
             let id = drag_id.clone();
+            drag::set_neighbours(app.other_note_windows(&id));
             drag::drag_window(
                 app.owner,
                 window.clone(),

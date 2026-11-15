@@ -13,7 +13,7 @@ use nsh_core::prelude::*;
 use crate::app::{App, Note, NoteCommand};
 use crate::model::{Look, NoteMeta, Rect, Rgb};
 use crate::ui::TextLook;
-use crate::{bubble, drag, editor_view, note_menu};
+use crate::{bubble, drag, editor_view, layout, note_menu};
 
 /// The title bar's height, and a rolled-up note's.
 pub const TITLE_HEIGHT: f32 = 30.0;
@@ -55,6 +55,42 @@ fn attributes(look: &Look, resizable: bool) -> WindowAttributes {
     a.resizable = Some(resizable);
     a.level = Some(if look.always_on_top { WindowLevel::Floating } else { WindowLevel::Normal });
     a
+}
+
+impl App {
+    /// Where the other notes on the desktop are (their windows as they
+    /// show when not opened from a bubble): what a dragged note snaps to.
+    pub fn other_note_windows(self, id: &str) -> Vec<Rect> {
+        untracked(|| self.desktop_notes()).iter().filter(|n| &*n.id != id).map(|n| n.meta.with_untracked(|m| shape_rect(m, false))).collect()
+    }
+
+    /// Brings back the notes that are off every screen (a monitor was
+    /// unplugged, the resolution changed). Reads the displays reactively:
+    /// call it in an effect, and it runs again when they change.
+    pub fn rescue_notes(self) {
+        let screens: Vec<Rect> = nsh_core::element::desktop::displays()
+            .iter()
+            .map(|d| Rect { x: d.visible_bounds.origin.x.0, y: d.visible_bounds.origin.y.0, w: d.visible_bounds.size.width.0, h: d.visible_bounds.size.height.0 })
+            .collect();
+        untracked(|| {
+            for note in self.notes.get_untracked() {
+                let meta = note.meta.get_untracked();
+                if meta.trashed.is_some() || !meta.on_desktop {
+                    continue;
+                }
+                let Some(to) = layout::rescued(shape_rect(&meta, false), &screens) else { continue };
+                self.update(&note, |m| {
+                    if m.bubble.enabled {
+                        m.bubble.x = to.x;
+                        m.bubble.y = to.y;
+                    } else {
+                        m.rect.x = to.x;
+                        m.rect.y = to.y;
+                    }
+                });
+            }
+        });
+    }
 }
 
 /// The desktop window of `note`. Put it in the tree while the note is on
@@ -218,6 +254,7 @@ fn title_bar(app: App, note: Note, window: nsh_core::element::desktop::WindowRef
                 return;
             }
             let id = drag_id.clone();
+            drag::set_neighbours(app.other_note_windows(&id));
             drag::drag_window(
                 app.owner,
                 window.clone(),

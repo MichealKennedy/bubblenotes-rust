@@ -37,6 +37,7 @@ mod drag;
 mod editor_view;
 mod formats;
 mod kit;
+mod layout;
 mod manager;
 mod media;
 mod model;
@@ -69,7 +70,8 @@ pub fn BubbleNotes() -> impl IntoElement {
     tray::install(app);
     alarms::install(app);
     system::install(app);
-    effect(move || drag::set_snap_to_edges(app.settings.with(|s| s.snap_to_edges)));
+    effect(move || drag::set_snap(app.settings.with(|s| s.snap_to_edges)));
+    effect(move || app.rescue_notes());
     // For development: BUBBLENOTES_OPEN=manager,options,config opens those
     // windows at start.
     if let Ok(open) = std::env::var("BUBBLENOTES_OPEN") {
