@@ -78,7 +78,7 @@ pub fn ctx_for(app: App, note: &Note) -> Ctx {
         AppAction::InsertImage => insert_image(),
         AppAction::EditLink => edit_link(),
     });
-    Ctx { editor, revision: app.revision, selection, status, editing_link, app: stored(actions) }
+    Ctx { editor, read_only: signal(false), revision: app.revision, selection, status, editing_link, app: stored(actions) }
 }
 
 /// Inserts the images among pasted or dropped files at the selection:
@@ -122,6 +122,14 @@ pub fn note_editor(
     placeholder: &'static str,
     look: impl Fn() -> TextLook + 'static,
 ) -> impl IntoElement {
+    // A locked note shows no formatting menus.
+    let locked = editable.clone();
+    effect(move || {
+        let read_only = !locked();
+        if ctx.read_only.get_untracked() != read_only {
+            ctx.read_only.set(read_only);
+        }
+    });
     // Only a real change of the look makes the element again.
     let current = signal(untracked(&look));
     effect(move || {

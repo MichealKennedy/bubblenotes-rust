@@ -24,6 +24,8 @@ use nsh_base::rich_editor::{
 use nsh_base::theme;
 use nsh_core::element::ImageSrc;
 use nsh_core::prelude::*;
+
+use crate::win;
 use serde_json::{Value, json};
 
 use crate::formats::ATTACHMENTS;
@@ -409,13 +411,23 @@ pub fn with_node_views(views: NodeViews) -> NodeViews {
 #[derive(Clone, Copy)]
 pub struct TextWidth(pub Signal<f32>);
 
+/// The narrowest an image can be dragged to, in points.
+const MIN_IMAGE_WIDTH: f32 = 32.0;
+
 /// An image at the size it asks for (its natural size when it asks for
 /// none), scaled down to the text's width.
 struct ImageView;
 
 impl NodeView for ImageView {
-    fn create(&self, _: &NodeViewCx, node: &Node) -> AnyElement {
+    fn create(&self, cx: &NodeViewCx, node: &Node) -> AnyElement {
         let attrs = node.attrs();
+        let session = cx.session.clone();
+        let get_pos = std::rc::Rc::new(cx.get_pos());
+        let window = nsh_core::element::desktop::current_window();
+        let owner = Owner::current();
+        let hovered = signal(false);
+        // The width being dragged to, while the corner handle is held.
+        let dragged = signal(None::<f32>);
         let src = attrs.get("src").and_then(Value::as_str).unwrap_or_default().to_string();
         let number = |key: &str| {
             attrs.get(key).and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).map(|n| n as f32)
@@ -433,21 +445,83 @@ impl NodeView for ImageView {
         let room = use_context::<TextWidth>();
         let size = move || {
             let natural = natural.get().filter(|(w, h)| *w > 0.0 && *h > 0.0);
-            let aspect = natural.map(|(w, h)| w / h);
+            let aspect = natural.map(|(w, h)| w / h).or(match (width, height) {
+                (Some(w), Some(h)) if h > 0.0 => Some(w / h),
+                _ => None,
+            });
+            let max = room.map(|r| r.0.get()).filter(|m| *m > 0.0).unwrap_or(f32::MAX);
+            if let Some(w) = dragged.get() {
+                let w = w.clamp(MIN_IMAGE_WIDTH, max);
+                return (w, aspect.map_or(0.0, |a| w / a));
+            }
             let (w, h) = match (width, height) {
                 (Some(w), Some(h)) => (w, h),
                 (Some(w), None) => (w, aspect.map_or(0.0, |a| w / a)),
                 (None, Some(h)) => (aspect.map_or(0.0, |a| h * a), h),
                 (None, None) => natural.unwrap_or_default(),
             };
-            let max = room.map(|r| r.0.get()).filter(|m| *m > 0.0).unwrap_or(f32::MAX);
             if w > max { (max, h * max / w) } else { (w, h) }
         };
         let mut el = image(src).rounded(px(8.0)).w(move || px(size().0)).h(move || px(size().1));
         if let Some(alt) = attrs.get("alt").and_then(Value::as_str) {
             el = el.label(alt.to_string());
         }
-        el.into_element()
+
+        // The corner handle: drag it to resize the image (its shape kept).
+        let resize = move || {
+            let Some(start) = win::cursor() else { return };
+            let scale = untracked(|| window.state()).map(|s| s.scale_factor).unwrap_or(1.0).max(0.1);
+            let from = untracked(size).0;
+            let (session, get_pos) = (session.clone(), get_pos.clone());
+            owner.run(|| {
+                let _ = spawn(async move {
+                    dragged.set(Some(from));
+                    while win::primary_button_down() {
+                        timer(std::time::Duration::from_millis(8)).await;
+                        let Some(now) = win::cursor() else { break };
+                        dragged.set(Some((from + (now.0 - start.0) / scale).max(MIN_IMAGE_WIDTH)));
+                    }
+                    let to = untracked(size).0.round();
+                    if (to - from).abs() >= 1.0
+                        && let Some(pos) = get_pos()
+                    {
+                        let state = session.state();
+                        let mut tr = state.tr();
+                        // Only the width is kept: the height follows the
+                        // image's shape.
+                        let sized = tr.set_node_attribute(pos, "width", Value::from(to)).is_ok()
+                            && tr.set_node_attribute(pos, "height", Value::Null).is_ok();
+                        if sized {
+                            let _ = session.dispatch(tr);
+                        }
+                    }
+                    dragged.set(None);
+                });
+            });
+        };
+        let handle = view()
+            .absolute()
+            .right(px(4.0))
+            .bottom(px(4.0))
+            .w(px(14.0))
+            .h(px(14.0))
+            .rounded(px(4.0))
+            .border_2()
+            .border_color(nsh_core::Color(0x1f2937cc))
+            .bg(nsh_core::Color(0xffffffee))
+            .cursor(Cursor::NwseResize)
+            .label("Resize image")
+            .style_when(move || !hovered.get() && dragged.get().is_none(), |s| s.hidden())
+            .on_press_down(resize);
+        view()
+            .relative()
+            .w(move || px(size().0))
+            .h(move || px(size().1))
+            .on_mouse_enter(move |_: &MouseEvent| hovered.set(true))
+            .on_mouse_leave(move |_: &MouseEvent| hovered.set(false))
+            .child(el)
+            .child(handle)
+            .into_element()
     }
 }
 

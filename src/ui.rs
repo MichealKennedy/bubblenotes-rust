@@ -20,6 +20,9 @@ use crate::{slash, toggle};
 #[derive(Clone, Copy)]
 pub struct Ctx {
     pub editor: Signal<Editor>,
+    /// The note can't be edited here (locked, or in the trash): no
+    /// formatting menus.
+    pub read_only: Signal<bool>,
     /// Bumped on every change of the editor's state: what active states,
     /// menus and the status bar follow.
     pub revision: Signal<u64>,
@@ -399,7 +402,14 @@ pub fn slash_menu(ctx: Ctx, window_height: Signal<f32>) -> impl IntoElement {
     let pick = move |action: &'static Action| {
         ctx.editor.with_untracked(slash::remove_query);
         ctx.perform(action);
+        // A click on the menu takes the focus from the text as it ends:
+        // give it back once it has.
+        let _ = set_timeout(std::time::Duration::from_millis(40), move || ctx.editor.with_untracked(|e| e.session.focus()));
     };
+    // Where the pointer last was over the menu: rows follow it only when it
+    // really moves, so a row sliding under a resting pointer (the menu
+    // opening there, the arrows scrolling it) doesn't steal the highlight.
+    let pointer = stored(None::<(f32, f32)>);
     effect(move || {
         let now = ctx.slash_open();
         let before = open.get_untracked();
@@ -479,7 +489,12 @@ pub fn slash_menu(ctx: Ctx, window_height: Signal<f32>) -> impl IntoElement {
             scroll()
                 .max_h(px(max_height))
                 .children(found.into_iter().enumerate().map(|(i, action)| {
-                    menu_row(action, move || index.get() == i, move || index.set(i), move || pick(action))
+                    menu_row(action, move || index.get() == i, move |at| {
+                        if pointer.get().is_some_and(|last| last != at) {
+                            index.set(i);
+                        }
+                        pointer.replace(Some(at));
+                    }, move || pick(action))
                         .element_ref(&rows[i])
                         .into_element()
                 }))
@@ -498,6 +513,8 @@ fn popup() -> View {
         .border_1()
         .border_color(move || theme().border)
         .bg(move || theme().popover)
+        // Its own text colour: inside a note it would take the note's.
+        .text_color(move || theme().popover_foreground)
         .shadow_lg()
 }
 
@@ -505,7 +522,7 @@ fn popup() -> View {
 fn menu_row(
     action: &'static Action,
     highlighted: impl Fn() -> bool + 'static,
-    hover: impl Fn() + 'static,
+    hover: impl Fn((f32, f32)) + 'static,
     press: impl Fn() + 'static,
 ) -> View {
     view()
@@ -516,7 +533,7 @@ fn menu_row(
         .py(px(6.0))
         .rounded(px(6.0))
         .bg(move || if highlighted() { theme().accent } else { theme().popover })
-        .on_mouse_enter(move |_: &MouseEvent| hover())
+        .on_mouse_move(move |e: &MouseEvent| hover((e.page_position.x.0, e.page_position.y.0)))
         .on_press(press)
         .child(
             view()
@@ -555,7 +572,7 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
     });
     let visible = move || {
         let selected = ctx.selection.with(|s| s.as_ref().is_some_and(|s| !s.empty && s.kind == "text"));
-        (selected || ctx.editing_link.get()) && ctx.slash_open().is_none()
+        (selected || ctx.editing_link.get()) && ctx.slash_open().is_none() && !ctx.read_only.get()
     };
     // Opening the link editor starts from the link's address.
     effect(move || {
@@ -640,7 +657,7 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
                 .children(ids.iter().map(move |id| {
                     let action = actions::get(id);
                     let hovered = signal(false);
-                    menu_row(action, move || hovered.get(), move || hovered.set(true), move || {
+                    menu_row(action, move || hovered.get(), move |_| hovered.set(true), move || {
                         more.set(false);
                         ctx.perform(action);
                     })

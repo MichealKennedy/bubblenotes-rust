@@ -24,7 +24,6 @@ pub fn plugin() -> Plugin {
     let mut options = SuggestionOptions::default();
     options.key = KEY.into();
     options.trigger = trigger;
-    options.decoration_class = Some("text-muted-foreground".into());
     options.capture_keys = ["ArrowUp", "ArrowDown", "Enter", "Tab"].map(String::from).to_vec();
     options.allow = Some(Arc::new(|state: &EditorState, range, _| {
         state.doc().resolve(range.from).is_ok_and(|at| at.parent().ty().name() != "codeBlock")
