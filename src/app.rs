@@ -63,6 +63,12 @@ pub enum NoteCommand {
     AutoSize,
 }
 
+thread_local! {
+    /// The running app, for code the framework calls without it (an
+    /// editor's node views).
+    static CURRENT: std::cell::Cell<Option<App>> = const { std::cell::Cell::new(None) };
+}
+
 #[derive(Clone, Copy)]
 pub struct App {
     /// Every note, deleted ones (in the trash) included.
@@ -126,6 +132,7 @@ impl App {
             index_dirty: signal(false),
             text_changed: signal(0.0),
         };
+        CURRENT.with(|current| current.set(Some(app)));
         let notes: Vec<Note> = metas.into_iter().map(|meta| app.open_note(meta)).collect();
         app.notes.set(notes);
         if first_run {
@@ -182,6 +189,11 @@ impl App {
             .map(|doc| formats::images_to_absolute(&kit.schema, &doc, &file));
         let editor = kit.editor(doc);
         self.owner.run(|| Note { id: Rc::from(meta.id.as_str()), saved: signal(editor.doc()), meta: signal(meta), editor })
+    }
+
+    /// The running app, once it has started (`None` in tests).
+    pub fn current() -> Option<Self> {
+        CURRENT.with(|current| current.get())
     }
 
     // ----- Finding notes -----------------------------------------------------------

@@ -50,7 +50,7 @@ impl Format {
             // no trailing blank lines for it, one final newline.
             Format::Markdown => markdown()
                 .serialize(&cards_as_links(doc))
-                .map(|s| format!("{}\n", s.trim_end()))
+                .map(|s| format!("{}\n", s.trim_end().replace(LINK_OPEN, "[[").replace(LINK_CLOSE, "]]")))
                 .map_err(|e| e.to_string()),
             Format::Html => HtmlFormat::default().serialize(doc).map(html_page).map_err(|e| e.to_string()),
             Format::Text => PlainTextFormat::default().serialize(doc).map_err(|e| e.to_string()),
@@ -99,6 +99,11 @@ fn markdown() -> MarkdownFormat {
     MarkdownFormat::new(MarkdownNames::default())
 }
 
+/// Stand-ins for a note link's `[[` and `]]` while Markdown is written
+/// (it would escape real brackets).
+const LINK_OPEN: char = '\u{e000}';
+const LINK_CLOSE: char = '\u{e001}';
+
 /// `doc` with each YouTube card as a paragraph holding its link (titled
 /// when the title is known; an empty card is left out): what Markdown
 /// writes for cards, which it has no syntax for.
@@ -115,6 +120,12 @@ fn cards_as_links(doc: &Node) -> Node {
                     "type": "paragraph",
                     "content": [{ "type": "text", "text": label, "marks": [{ "type": "link", "attrs": { "href": url } }] }],
                 });
+            } else if child.get("type").and_then(Value::as_str) == Some("noteLink") {
+                // A link to a note is written as it's typed.
+                let title = child.pointer("/attrs/title").and_then(Value::as_str).unwrap_or_default().to_string();
+                // (Marked with private-use characters, turned into the
+                // brackets once Markdown has escaped the rest.)
+                *child = serde_json::json!({ "type": "text", "text": format!("{LINK_OPEN}{title}{LINK_CLOSE}") });
             } else {
                 walk(child);
             }
@@ -122,7 +133,7 @@ fn cards_as_links(doc: &Node) -> Node {
     }
     let mut found = false;
     doc.descendants(&mut |node, _, _, _| {
-        found |= node.ty().name() == "youtube";
+        found |= matches!(node.ty().name(), "youtube" | "noteLink");
         !found
     });
     if !found {

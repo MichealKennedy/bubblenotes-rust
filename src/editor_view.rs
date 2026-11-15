@@ -224,7 +224,8 @@ pub fn note_editor(
                 .w(move || px(origin.get().0 + width.get()))
                 .h(move || px(if window_height.get() == f32::MAX { 0.0 } else { window_height.get() }))
                 .pointer_events(PointerEvents::BoxNone)
-                .child(ui::slash_menu(ctx, window_height)),
+                .child(ui::slash_menu(ctx, window_height))
+                .children(owned(ctx).map(|o| crate::links::menu(ctx, o.app, window_height).into_element())),
         )
 }
 

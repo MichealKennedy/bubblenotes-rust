@@ -38,6 +38,7 @@ mod editor_view;
 mod formats;
 mod kit;
 mod layout;
+mod links;
 mod manager;
 mod media;
 mod model;
