@@ -212,7 +212,7 @@ fn label_size(b: &Bubble) -> f32 {
 }
 
 /// The bubble itself: its shape, its label centred on it.
-fn bubble_shape(meta: Signal<NoteMeta>) -> View {
+fn bubble_shape(meta: Signal<NoteMeta>, badge: impl Fn() -> Option<String> + Copy + 'static) -> View {
     let bubble = move || meta.with(|m| m.bubble.clone());
     let size = move || px(meta.with(|m| m.bubble.size));
     // The label sits on the shape's visual centre: a sphere's is above its
@@ -248,6 +248,61 @@ fn bubble_shape(meta: Signal<NoteMeta>) -> View {
                         .text_color(move || color(meta.with(|m| m.bubble.label_color), 1.0)),
                 ),
         )
+        // The badge: a small dark pill in the top right corner.
+        .child(dynamic(move || {
+            let label = badge()?;
+            Some(
+                view()
+                    .absolute()
+                    .top(px(0.0))
+                    .right(px(0.0))
+                    .h(px(15.0))
+                    .min_w(px(15.0))
+                    .px(px(4.0))
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .bg(nsh_core::Color(0x18181bf2))
+                    .border_1()
+                    .border_color(nsh_core::Color(0xffffffcc))
+                    .pointer_events(PointerEvents::None)
+                    .child(text(label).text_size(px(9.0)).font_weight(FontWeight::SEMIBOLD).text_color(nsh_core::Color(0xffffffff))),
+            )
+        }))
+}
+
+/// What a bubble's badge says: the time left to the note's alarm, else how
+/// many of its checklist items (`tasks`: done, all) are done. `None` for no
+/// badge.
+pub fn badge_text(meta: &NoteMeta, now: f64, tasks: (usize, usize)) -> Option<String> {
+    if !meta.bubble.badge {
+        return None;
+    }
+    if let Some(alarm) = meta.alarm {
+        let minutes = ((alarm.at - now) / 60_000.0).ceil().max(0.0);
+        return Some(match minutes {
+            m if m < 1.0 => "now".into(),
+            m if m < 60.0 => format!("{m:.0}m"),
+            m if m < 48.0 * 60.0 => format!("{:.0}h", (m / 60.0).round()),
+            m => format!("{:.0}d", (m / 1440.0).round()),
+        });
+    }
+    (tasks.1 > 0).then(|| format!("{}/{}", tasks.0, tasks.1))
+}
+
+/// The note's checklist items: how many are checked, how many there are.
+fn tasks(note: &Note) -> (usize, usize) {
+    let (mut done, mut all) = (0, 0);
+    note.editor.doc().descendants(&mut |node, _, _, _| {
+        if node.ty().name() == "taskItem" {
+            all += 1;
+            if node.attrs().get("checked").and_then(|c| c.as_bool()).unwrap_or(false) {
+                done += 1;
+            }
+        }
+        true
+    });
+    (done, all)
 }
 
 // ----- Opening and shutting ------------------------------------------------------------
@@ -352,7 +407,15 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
 
     let menu_note = note.clone();
     let drag_id = note.id.clone();
-    let bubble = bubble_shape(meta)
+    let badge_note = stored(note.clone());
+    let badge = move || {
+        // Follows the clock (the countdown) and the text (the checklist).
+        let now = app.now.get();
+        app.revision.get();
+        let note = badge_note.get();
+        meta.with(|m| badge_text(m, now, tasks(&note)))
+    };
+    let bubble = bubble_shape(meta, badge)
         .cursor(Cursor::Default)
         .style_when(move || open.get() && direction == BubbleDirection::OnTop, |s| s.hidden())
         .on_press_down(move || {
@@ -451,6 +514,26 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_badge_counts_down_to_the_alarm_or_counts_the_checklist() {
+        let mut m = NoteMeta::default();
+        assert_eq!(badge_text(&m, 0.0, (0, 0)), None);
+        assert_eq!(badge_text(&m, 0.0, (2, 5)).as_deref(), Some("2/5"));
+        let alarm = |minutes: f64| Some(crate::model::Alarm { at: minutes * 60_000.0, repeat: Default::default() });
+        m.alarm = alarm(0.5);
+        assert_eq!(badge_text(&m, 0.0, (2, 5)).as_deref(), Some("1m"));
+        m.alarm = alarm(45.0);
+        assert_eq!(badge_text(&m, 0.0, (0, 0)).as_deref(), Some("45m"));
+        m.alarm = alarm(150.0);
+        assert_eq!(badge_text(&m, 0.0, (0, 0)).as_deref(), Some("3h"));
+        m.alarm = alarm(4.0 * 1440.0);
+        assert_eq!(badge_text(&m, 0.0, (0, 0)).as_deref(), Some("4d"));
+        m.alarm = alarm(-3.0);
+        assert_eq!(badge_text(&m, 0.0, (0, 0)).as_deref(), Some("now"));
+        m.bubble.badge = false;
+        assert_eq!(badge_text(&m, 0.0, (2, 5)), None);
+    }
 
     const DIRECTIONS: [BubbleDirection; 5] =
         [BubbleDirection::Bottom, BubbleDirection::Right, BubbleDirection::Top, BubbleDirection::Left, BubbleDirection::OnTop];

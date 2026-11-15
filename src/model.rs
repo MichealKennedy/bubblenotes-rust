@@ -124,6 +124,9 @@ pub struct Bubble {
     pub close_on_leave: bool,
     /// The wheel over the bubble opens (up) and closes (down) it.
     pub wheel: bool,
+    /// A small badge on the bubble: the time to the note's alarm, or how
+    /// many of its checklist items are done.
+    pub badge: bool,
     /// Where the bubble sits (its top left corner), in points.
     pub x: f32,
     pub y: f32,
@@ -147,6 +150,7 @@ impl Default for Bubble {
             animate_ms: 180,
             close_on_leave: true,
             wheel: true,
+            badge: true,
             x: 120.0,
             y: 120.0,
         }

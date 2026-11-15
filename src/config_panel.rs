@@ -673,8 +673,8 @@ fn bubble_part(app: App, note: Note) -> impl IntoElement {
     };
     let e = move || edit.clone();
     let picking_emoji = signal(false);
-    let (e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16) =
-        (e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e());
+    let (e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16, e17) =
+        (e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e(), e());
     let shapes = vec![
         (BubbleShape::Sphere, "◉", "Sphere"),
         (BubbleShape::Circle, "●", "Circle"),
@@ -782,6 +782,7 @@ fn bubble_part(app: App, note: Note) -> impl IntoElement {
             e15(&|m| m.bubble.close_on_leave = on)
         }))
         .child(switch_row("Mouse wheel opens and closes", move || meta.with(|m| m.bubble.wheel), move |on| e16(&|m| m.bubble.wheel = on)))
+        .child(switch_row("Badge: alarm countdown or checklist", move || meta.with(|m| m.bubble.badge), move |on| e17(&|m| m.bubble.badge = on)))
 }
 
 fn shapes_name(shape: BubbleShape) -> &'static str {
