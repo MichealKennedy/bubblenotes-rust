@@ -1,13 +1,10 @@
-# Welcome to Rich Notes
+**Welcome to Bubble Notes**
 
-This is a **WYSIWYG** editor: you edit formatted text directly. Type `/` on a new line for the block menu, or **select some text** for the formatting menu beside it.
+Drag the title to move, the corner to resize. Double-click the title to roll the note up.
 
-## Things to try
+**Right-click** a note for its menu: colours, always on top, sleep, alarms, or show it as a bubble.
 
-- Select a word, then try **B**, *I*, underline, a list, or 🔗 to link it
-- Press **…** in that menu for tables, images, dividers and clear formatting
-- Type Markdown shortcuts: `## ` for a heading, `- ` for a list, `[ ] ` for a task
-- [ ] Check the rigging
-- [x] Fuel filters
+Type `/` on a new line for headings, checklists and more. Select text to format it.
 
-> Notes are Markdown (.md) or HTML (.html), chosen by the extension you save with. Images are copied into an attachments folder next to the note.
+- [ ] Paste an image or a YouTube link
+- [ ] Open the Notes Manager from the tray icon

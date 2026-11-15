@@ -5,6 +5,7 @@
 use nsh_base::rich_editor::commands::BoxCommand;
 use serde_json::{Value, json};
 
+use crate::editor_view::media;
 use crate::kit::Editor;
 use crate::toggle;
 
@@ -75,6 +76,7 @@ pub const ACTIONS: &[Action] = &[
     Action { id: "codeblock", label: "Code block", glyph: "{ }", hint: "Monospaced code", keywords: &["code", "pre", "snippet"], run: cmd!("toggleCodeBlock"), active: Some(("codeBlock", none)) },
     Action { id: "table", label: "Table", glyph: "⊞", hint: "3 × 3 with a header row", keywords: &["grid"], run: cmd!("insertTable", json!({ "rows": 3, "cols": 3, "withHeaderRow": true })), active: None },
     Action { id: "image", label: "Image", glyph: "🖼", hint: "A picture from your computer", keywords: &["picture", "photo", "img"], run: Run::App(AppAction::InsertImage), active: None },
+    Action { id: "youtube", label: "YouTube video", glyph: "▶", hint: "A card for a YouTube link", keywords: &["video", "youtube", "embed", "film"], run: Run::Make(media::youtube_command), active: Some(("youtube", none)) },
     Action { id: "divider", label: "Divider", glyph: "—", hint: "A horizontal line", keywords: &["hr", "rule", "separator", "line"], run: cmd!("setHorizontalRule"), active: None },
     // Marks.
     Action { id: "bold", label: "Bold", glyph: "B", hint: "Ctrl/⌘+B", keywords: &[], run: cmd!("toggleBold"), active: Some(("bold", none)) },
@@ -101,14 +103,14 @@ pub const TOOLBAR: &[&[&str]] = &[
     &["text", "h1", "h2", "h3"],
     &["bold", "italic", "underline", "strike", "code", "highlight", "subscript", "superscript", "link"],
     &["bullet", "numbered", "todo", "toggle", "outdent", "indent"],
-    &["quote", "codeblock", "table", "image", "divider"],
+    &["quote", "codeblock", "table", "image", "youtube", "divider"],
     &["align-left", "align-center", "align-right", "clear"],
 ];
 pub const SLASH: &[&str] =
-    &["text", "h1", "h2", "h3", "bullet", "numbered", "todo", "toggle", "quote", "codeblock", "table", "image", "divider"];
+    &["text", "h1", "h2", "h3", "bullet", "numbered", "todo", "toggle", "quote", "codeblock", "table", "image", "youtube", "divider"];
 pub const SELECTION: &[&[&str]] =
     &[&["bullet", "numbered", "todo", "toggle"], &["bold", "italic", "underline", "strike"], &["outdent", "indent"], &["link"]];
-pub const SELECTION_MORE_INSERT: &[&str] = &["table", "image", "divider", "codeblock", "quote"];
+pub const SELECTION_MORE_INSERT: &[&str] = &["table", "image", "youtube", "divider", "codeblock", "quote"];
 pub const SELECTION_MORE_FORMAT: &[&str] = &["code", "highlight", "clear"];
 
 /// The text colors: a CSS color for the document, and the class the editor
@@ -213,6 +215,8 @@ mod tests {
         assert_eq!(&names[..3], &["h1", "h2", "h3"]);
         assert_eq!(slash_matches("todo")[0].id, "todo");
         assert_eq!(slash_matches("toggle")[0].id, "toggle");
+        assert_eq!(slash_matches("you")[0].id, "youtube");
+        assert_eq!(slash_matches("video")[0].id, "youtube");
         assert!(slash_matches("zzz").is_empty());
     }
 }

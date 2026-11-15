@@ -7,6 +7,7 @@
 //! schema instance (its edits are silently refused).
 
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Poll, Waker};
 
@@ -23,6 +24,7 @@ use nsh_base::rich_editor::{
 };
 use serde_json::Value;
 
+use crate::editor_view::media;
 use crate::{slash, toggle};
 
 // ----- What the editor tells the app ----------------------------------------
@@ -30,14 +32,13 @@ use crate::{slash, toggle};
 /// What reaches the app from the editor outside its view's events.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AppEvent {
-    /// File shortcuts pressed while the editor has the focus (a focused
+    /// Ctrl/⌘+N pressed while an editor has the focus (a focused
     /// `RichEditor` binds every Ctrl/⌘ keystroke itself, so window shortcuts
-    /// don't fire then; its keymap gets them instead). There's no Save As
-    /// key: Ctrl/⌘+Shift+S is strikethrough, as in Notion and Tiptap.
-    New,
-    Open,
-    Save,
-    /// Ctrl/⌘+K: edit the link at the selection.
+    /// don't fire then; its keymap gets them instead).
+    NewNote,
+    /// Ctrl/⌘+K: edit the link at the selection. The relay can't tell
+    /// which editor had the focus: the focused editor element takes the
+    /// request itself ([`Request`]), woken by the `Changed` that follows.
     Link,
     /// The editor's state changed, also when only a plugin's state did (the
     /// slash menu's captured keys), which the view's events don't report.
@@ -81,18 +82,25 @@ impl Relay {
         let relay = self.clone();
         Extension::new("appShortcuts").add_keyboard_shortcuts(move |_| {
             [
-                ("Mod-n", AppEvent::New),
-                ("Mod-o", AppEvent::Open),
-                ("Mod-s", AppEvent::Save),
-                ("Mod-k", AppEvent::Link),
+                ("Mod-n", Some(AppEvent::NewNote), None),
+                ("Mod-k", Some(AppEvent::Link), Some(Request::Link)),
+                ("Mod-d", None, Some(Request::Duplicate)),
             ]
             .into_iter()
-            .map(|(keys, event)| {
+            .map(|(keys, event, request)| {
                 let relay = relay.clone();
                 let command: BoxCommand = Arc::new(move |_, dispatch| {
                     // Only a real key press, not a "could it run?" check.
                     if dispatch.is_some() {
-                        relay.push(event);
+                        if let Some(event) = event {
+                            relay.push(event);
+                        }
+                        if let Some(request) = request {
+                            request.flag().store(true, Ordering::SeqCst);
+                            // Nothing changed in the document: this wakes
+                            // the editor elements, which look at the flag.
+                            relay.push(AppEvent::Changed);
+                        }
                     }
                     true
                 });
@@ -100,6 +108,34 @@ impl Relay {
             })
             .collect()
         })
+    }
+}
+
+/// A shortcut pressed in an editor that only the focused editor element
+/// knows what to do with (which note, which window): set by the keymap,
+/// taken by that element (`editor_view`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Request {
+    /// Ctrl/⌘+K: edit the link at the selection.
+    Link,
+    /// Ctrl/⌘+D: duplicate the note.
+    Duplicate,
+}
+
+static LINK_REQUESTED: AtomicBool = AtomicBool::new(false);
+static DUPLICATE_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+impl Request {
+    fn flag(self) -> &'static AtomicBool {
+        match self {
+            Request::Link => &LINK_REQUESTED,
+            Request::Duplicate => &DUPLICATE_REQUESTED,
+        }
+    }
+
+    /// Whether it was asked for since the last call (which clears it).
+    pub fn take(self) -> bool {
+        self.flag().swap(false, Ordering::SeqCst)
     }
 }
 
@@ -117,19 +153,22 @@ impl Kit {
     /// Tiptap's starter kit (paragraphs, headings, lists, task lists,
     /// quotes, code, links, images, bold/italic/strike/underline/highlight/
     /// sub/sup, text color, alignment, history, typing shortcuts), tables,
-    /// toggles, the slash menu, and the app's file shortcuts.
+    /// toggles, YouTube cards, the slash menu, and the app's file shortcuts.
     pub fn new(relay: Relay) -> Rc<Self> {
         let manager = ExtensionManager::with_core(vec![
             relay.shortcuts(),
             starter_kit(),
             table_kit(),
             toggle::extension(),
+            media::extension(),
         ])
         .expect("the editor's extensions resolve");
         let schema = manager.schema().clone();
         // The slash menu comes first: while it's open, its Enter and arrows
-        // come before the keymap's (which would split the paragraph).
-        let mut plugins = vec![slash::plugin()];
+        // come before the keymap's (which would split the paragraph). A
+        // pasted YouTube link becomes a card before Markdown or the link
+        // extension take it as text.
+        let mut plugins = vec![slash::plugin(), media::paste_plugin()];
         plugins.extend(manager.plugins());
         // Markdown pasted as plain text is read as Markdown, and copies put
         // Markdown on the clipboard (the starter kit has the typing rules).
@@ -149,7 +188,7 @@ impl Kit {
         }
         let state = EditorState::create(config).expect("a document of the kit's schema");
         let session = EditorSession::new(state, NodeViews::new());
-        session.set_node_views(toggle::node_views());
+        session.set_node_views(media::with_node_views(toggle::node_views()));
         let relay = self.relay.clone();
         session.subscribe(Arc::new(move |_| relay.push(AppEvent::Changed)));
         Editor { session, kit: self.clone() }
@@ -216,5 +255,33 @@ impl Editor {
     /// The attributes of the mark or node `name` at the selection.
     pub fn attributes(&self, name: &str) -> Attrs {
         self.session.get_attributes(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nsh_base::rich_editor::state::KeyEvent;
+
+    /// Whether some plugin of a new editor takes Ctrl/⌘+`key`.
+    fn press_mod(key: &str) -> bool {
+        let editor = Kit::new(Relay::default()).editor(None);
+        let state = editor.state();
+        let mut event = KeyEvent::new(key);
+        event.mod_key = true;
+        event.ctrl = !cfg!(target_os = "macos");
+        event.meta = cfg!(target_os = "macos");
+        state.plugins().iter().any(|p| p.handle_key_down(&state, &event, &mut |_| {}))
+    }
+
+    #[test]
+    fn link_and_duplicate_shortcuts_reach_the_focused_element() {
+        Request::Link.take();
+        Request::Duplicate.take();
+        assert!(press_mod("k"));
+        assert!(Request::Link.take());
+        assert!(!Request::Link.take());
+        assert!(press_mod("d"));
+        assert!(Request::Duplicate.take());
     }
 }

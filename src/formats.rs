@@ -49,7 +49,7 @@ impl Format {
             // The editor keeps an empty paragraph at the end to type into:
             // no trailing blank lines for it, one final newline.
             Format::Markdown => markdown()
-                .serialize(doc)
+                .serialize(&cards_as_links(doc))
                 .map(|s| format!("{}\n", s.trim_end()))
                 .map_err(|e| e.to_string()),
             Format::Html => HtmlFormat::default().serialize(doc).map(html_page).map_err(|e| e.to_string()),
@@ -58,8 +58,48 @@ impl Format {
     }
 }
 
+/// The document as HTML without a page around it: what a note's file holds
+/// inside its `<body>`, and what goes on the clipboard.
+pub fn html_fragment(doc: &Node) -> Result<String, String> {
+    HtmlFormat::default().serialize(doc).map_err(|e| e.to_string())
+}
+
 fn markdown() -> MarkdownFormat {
     MarkdownFormat::new(MarkdownNames::default())
+}
+
+/// `doc` with each YouTube card as a paragraph holding its link (titled
+/// when the title is known; an empty card is left out): what Markdown
+/// writes for cards, which it has no syntax for.
+fn cards_as_links(doc: &Node) -> Node {
+    fn walk(value: &mut Value) {
+        let Some(children) = value.get_mut("content").and_then(Value::as_array_mut) else { return };
+        children.retain(|c| c.get("type").and_then(Value::as_str) != Some("youtube") || c.pointer("/attrs/url").and_then(Value::as_str).is_some_and(|u| !u.is_empty()));
+        for child in children {
+            if child.get("type").and_then(Value::as_str) == Some("youtube") {
+                let get = |name: &str| child.pointer(&format!("/attrs/{name}")).and_then(Value::as_str).unwrap_or_default().to_string();
+                let (url, title) = (get("url"), get("title"));
+                let label = if title.is_empty() { url.clone() } else { title };
+                *child = serde_json::json!({
+                    "type": "paragraph",
+                    "content": [{ "type": "text", "text": label, "marks": [{ "type": "link", "attrs": { "href": url } }] }],
+                });
+            } else {
+                walk(child);
+            }
+        }
+    }
+    let mut found = false;
+    doc.descendants(&mut |node, _, _, _| {
+        found |= node.ty().name() == "youtube";
+        !found
+    });
+    if !found {
+        return doc.clone();
+    }
+    let mut json = doc.to_json();
+    walk(&mut json);
+    doc.ty().schema().node_from_json(&json).unwrap_or_else(|_| doc.clone())
 }
 
 /// What writing `doc` as Markdown would lose, in words; `None` when it reads
@@ -76,6 +116,7 @@ pub fn markdown_losses(schema: &Schema, doc: &Node) -> Option<String> {
             "textStyle" => "text color",
             "toggle" | "toggleTitle" | "toggleBody" => "toggles",
             "image" => "images",
+            "youtube" => "YouTube cards (kept as links)",
             other => other,
         };
         if !names.iter().any(|n| n == words) {

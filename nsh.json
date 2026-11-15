@@ -1,8 +1,8 @@
 {
-  "name": "Rich Notes",
-  "id": "com.example.richnotes",
+  "name": "Bubble Notes",
+  "id": "dev.bubblenotes.app",
   "version": "1.0.0",
   "build": 1,
   "rust": ".",
-  "root": "App"
+  "root": "BubbleNotes"
 }

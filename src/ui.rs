@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use nsh_base::rich_editor::view::{RichEditorClasses, RichEditorSelection};
 use nsh_base::theme;
+use nsh_core::element::desktop::{MenuItem, popup_menu};
 use nsh_core::prelude::*;
 use serde_json::json;
 
@@ -61,7 +62,7 @@ impl Ctx {
 
 // ----- Buttons ------------------------------------------------------------------
 
-/// A compact button: raised while `on`, dimmed while not `enabled`.
+/// A compact button: tinted while `on`, dimmed while not `enabled`.
 pub fn button(
     label: &'static str,
     description: &'static str,
@@ -71,7 +72,7 @@ pub fn button(
 ) -> impl IntoElement {
     let on = Rc::new(on);
     let enabled = Rc::new(enabled);
-    let (on_bg, on_text, enabled_style, enabled_press) = (on.clone(), on.clone(), enabled.clone(), enabled.clone());
+    let (enabled_style, enabled_press) = (enabled.clone(), enabled.clone());
     view()
         .min_w(px(28.0))
         .h(px(28.0))
@@ -79,7 +80,8 @@ pub fn button(
         .items_center()
         .justify_center()
         .rounded(px(6.0))
-        .bg(move || if on_bg() { theme().primary } else { theme().secondary })
+        .bg(move || if on() { tint(0.12) } else { tint(0.0) })
+        .hover(|s| s.bg(tint(0.07)))
         .style_when(move || !enabled_style(), |s| s.opacity(0.35))
         .active(|s| s.opacity(0.6))
         .label(description)
@@ -88,9 +90,13 @@ pub fn button(
                 press()
             }
         })
-        .child(text(label).text_size(px(13.0)).text_color(move || {
-            if on_text() { theme().primary_foreground } else { theme().secondary_foreground }
-        }))
+        .child(text(label).text_size(px(13.0)).text_color(move || theme().foreground))
+}
+
+/// The theme's ink at `alpha`: hover and pressed tints that read on both
+/// light and dark surfaces.
+pub fn tint(alpha: f32) -> AdaptiveColor {
+    theme().foreground.opacity(alpha)
 }
 
 /// A button for a catalog action.
@@ -103,59 +109,267 @@ pub fn separator() -> impl IntoElement {
     view().w(px(1.0)).h(px(18.0)).mx_1().bg(move || theme().border)
 }
 
-/// A text-color button: a dot of `rgb`, or the default color when `None`.
-fn swatch(ctx: Ctx, color: Option<(&'static str, u32)>) -> impl IntoElement {
-    view()
-        .w(px(20.0))
-        .h(px(20.0))
-        .items_center()
-        .justify_center()
-        .rounded(px(10.0))
-        .border_1()
-        .border_color(move || theme().border)
-        .bg(move || -> AdaptiveColor {
-            match color {
-                Some((_, rgb)) => nsh_core::color::rgb(rgb).into(),
-                None => theme().background,
-            }
-        })
-        .active(|s| s.opacity(0.6))
-        .label(if color.is_some() { "Text color" } else { "Default text color" })
-        .on_press(move || {
-            ctx.editor.with_untracked(|e| match color {
-                Some((css, _)) => e.run("setTextStyle", json!({ "color": css })),
-                None => e.run("unsetTextStyle", json!({})),
-            });
-            ctx.changed();
-        })
-        .child(text(if color.is_none() { "A" } else { "" }).text_size(px(11.0)))
+/// Sets the text color at the selection (`None`: back to the default).
+fn set_color(ctx: Ctx, css: Option<&'static str>) {
+    ctx.editor.with_untracked(|e| match css {
+        Some(css) => e.run("setTextStyle", json!({ "color": css })),
+        None => e.run("unsetTextStyle", json!({})),
+    });
+    ctx.changed();
+}
+
+/// A catalog color's name, from its class (`text-red-600`: "Red").
+fn color_name(class: &str) -> String {
+    let hue = class.split('-').nth(1).unwrap_or("Color");
+    let mut chars = hue.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 // ----- Toolbar --------------------------------------------------------------------
 
-/// The toolbar: the file buttons, then the catalog's groups and the colors.
-pub fn toolbar(ctx: Ctx, file_buttons: Vec<AnyElement>) -> impl IntoElement {
-    let mut bar = view()
-        .flex_row()
-        .flex_wrap()
-        .items_center()
-        .gap(px(4.0))
-        .px_3()
-        .py_2()
-        .border_b_1()
-        .border_color(move || theme().border)
-        .children(file_buttons);
-    for (i, group) in actions::TOOLBAR.iter().enumerate() {
-        bar = bar.child(separator()).children(group.iter().map(|id| action_button(ctx, id).into_element()));
-        // The colors go after the marks.
-        if i == 2 {
-            bar = bar
-                .child(separator())
-                .child(swatch(ctx, None))
-                .children(actions::COLORS.iter().map(|(css, _, rgb)| swatch(ctx, Some((css, *rgb))).into_element()));
+/// A toolbar button's width with the gap after it.
+const TOOL_WIDTH: f32 = 30.0;
+/// A separator's width with its margins.
+const SEPARATOR_WIDTH: f32 = 11.0;
+/// A color dot's width with the gap after it.
+const SWATCH_WIDTH: f32 = 22.0;
+
+/// What a toolbar slot holds: an action, or the text colors.
+#[derive(Clone, Copy)]
+enum Slot {
+    Action(&'static Action),
+    Colors,
+}
+
+impl Slot {
+    fn width(self) -> f32 {
+        match self {
+            Slot::Action(_) => TOOL_WIDTH,
+            Slot::Colors => SWATCH_WIDTH * (actions::COLORS.len() + 1) as f32,
         }
     }
-    bar
+}
+
+/// The catalog's toolbar groups in order, the colors after the marks.
+fn toolbar_groups() -> Vec<Vec<Slot>> {
+    let mut groups: Vec<Vec<Slot>> = Vec::new();
+    for (i, group) in actions::TOOLBAR.iter().enumerate() {
+        groups.push(group.iter().map(|id| Slot::Action(actions::get(id))).collect());
+        if i == 2 {
+            groups.push(vec![Slot::Colors]);
+        }
+    }
+    groups
+}
+
+/// How many slots, in order, fit in `width`, keeping room for "More" when
+/// some don't.
+fn slots_that_fit(groups: &[Vec<Slot>], width: f32) -> usize {
+    let total: usize = groups.iter().map(Vec::len).sum();
+    let mut used = 0.0;
+    let mut count = 0;
+    let mut fits = 0;
+    for (g, group) in groups.iter().enumerate() {
+        for (i, slot) in group.iter().enumerate() {
+            used += slot.width() + if g > 0 && i == 0 { SEPARATOR_WIDTH } else { 0.0 };
+            count += 1;
+            let more = if count < total { SEPARATOR_WIDTH + TOOL_WIDTH } else { 0.0 };
+            if used + more > width {
+                return fits;
+            }
+            fits = count;
+        }
+    }
+    fits
+}
+
+/// The formatting toolbar: the catalog's groups on one line, what doesn't
+/// fit the width behind "More" (a native menu).
+pub fn toolbar(ctx: Ctx) -> impl IntoElement {
+    let width = signal(0.0_f32);
+    let fits = signal(usize::MAX);
+    let groups = Rc::new(toolbar_groups());
+    let measure = groups.clone();
+    effect(move || {
+        let now = slots_that_fit(&measure, width.get());
+        if now != fits.get_untracked() {
+            fits.set(now);
+        }
+    });
+    view()
+        .flex_1()
+        .min_w(px(0.0))
+        .h(px(40.0))
+        .justify_center()
+        .overflow_hidden()
+        .on_layout(move |b: &Bounds<Points>| {
+            if (b.size.width.0 - width.get_untracked()).abs() > 0.5 {
+                width.set(b.size.width.0);
+            }
+        })
+        .child(dynamic(move || {
+            let fits = fits.get();
+            let mut bar = nsh_base::toolbar().accessibility_label("Formatting").items_center();
+            let mut hidden: Vec<Vec<Slot>> = Vec::new();
+            let mut index = 0;
+            for (g, group) in groups.iter().enumerate() {
+                let shown: Vec<Slot> = group.iter().copied().filter(|_| {
+                    index += 1;
+                    index <= fits
+                }).collect();
+                if shown.len() < group.len() {
+                    hidden.push(group[shown.len()..].to_vec());
+                }
+                if shown.is_empty() {
+                    continue;
+                }
+                if g > 0 {
+                    bar = bar.child(nsh_base::toolbar_separator().w(px(1.0)).h(px(18.0)).mx(px(5.0)).bg(move || theme().border));
+                }
+                let mut run = nsh_base::toolbar_group().items_center().gap(px(2.0));
+                for slot in shown {
+                    run = run.child(match slot {
+                        Slot::Action(action) => tool(ctx, action),
+                        Slot::Colors => swatches(ctx),
+                    });
+                }
+                bar = bar.child(run);
+            }
+            if !hidden.is_empty() {
+                bar = bar
+                    .child(nsh_base::toolbar_separator().w(px(1.0)).h(px(18.0)).mx(px(5.0)).bg(move || theme().border))
+                    .child(more_button(ctx, hidden));
+            }
+            bar
+        }))
+}
+
+/// A hint bubble for a toolbar item: its name, and its shortcut muted.
+fn hint(label: impl Into<String>, shortcut: &'static str) -> impl IntoTooltip {
+    let bubble = nsh_base::tooltip()
+        .flex_row()
+        .gap(px(6.0))
+        .px_2()
+        .py_1()
+        .rounded(px(6.0))
+        .bg(move || theme().foreground)
+        .shadow_md()
+        .child(text(label.into()).text_size(px(12.0)).text_color(move || theme().background));
+    if shortcut.is_empty() {
+        bubble
+    } else {
+        bubble.child(text(shortcut).text_size(px(12.0)).text_color(move || theme().background.opacity(0.65)))
+    }
+}
+
+/// `content` filling its button, with `tip` (components take no tooltip of
+/// their own).
+pub fn hinted(tip: impl IntoTooltip, content: impl IntoElement) -> View {
+    view().size_full().items_center().justify_center().tooltip(tip).child(content)
+}
+
+/// A toolbar item's look: a 28-point square, tinted on hover and while on.
+macro_rules! tool_look {
+    ($el:expr, $on:expr, $enabled:expr) => {{
+        let (on, enabled) = ($on, $enabled);
+        $el.w(px(28.0))
+            .h(px(28.0))
+            .items_center()
+            .justify_center()
+            .rounded(px(6.0))
+            .bg(move || if on() { tint(0.12) } else { tint(0.0) })
+            .hover(|s| s.bg(tint(0.07)))
+            .active(|s| s.opacity(0.6))
+            .style_when(move || !enabled(), |s| s.opacity(0.35))
+    }};
+}
+
+/// A toolbar item for a catalog action: a toggle when it has an on state,
+/// else a button.
+fn tool(ctx: Ctx, action: &'static Action) -> AnyElement {
+    let glyph = text(action.glyph).text_size(px(13.0)).text_color(move || theme().foreground);
+    let enabled = move || ctx.is_enabled(action);
+    if action.active.is_some() {
+        let toggle = nsh_base::toggle()
+            .pressed(move || ctx.is_active(action))
+            .accessibility_label(action.label)
+            .on_change(move |_: &bool| ctx.perform(action));
+        tool_look!(toggle, move || ctx.is_active(action), enabled).child(hinted(hint(action.label, action.hint), glyph)).into_element()
+    } else {
+        let button = nsh_base::button().accessibility_label(action.label).on_press(move || {
+            if ctx.is_enabled(action) {
+                ctx.perform(action);
+            }
+        });
+        tool_look!(button, || false, enabled).child(hinted(hint(action.label, action.hint), glyph)).into_element()
+    }
+}
+
+/// The text colors: the default, then the catalog's dots.
+fn swatches(ctx: Ctx) -> AnyElement {
+    let dot = |css: Option<&'static str>, rgb: Option<u32>, label: String| {
+        nsh_base::button()
+            .accessibility_label(label.clone())
+            .w(px(18.0))
+            .h(px(18.0))
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .border_1()
+            .border_color(move || tint(0.18))
+            .bg(move || -> AdaptiveColor {
+                match rgb {
+                    Some(rgb) => nsh_core::color::rgb(rgb).into(),
+                    None => theme().background,
+                }
+            })
+            .hover(|s| s.scale(1.12))
+            .active(|s| s.opacity(0.6))
+            .on_press(move || set_color(ctx, css))
+            .child(hinted(hint(label, ""), text(if rgb.is_none() { "A" } else { "" }).text_size(px(10.0)).text_color(move || theme().foreground)))
+            .into_element()
+    };
+    nsh_base::toolbar_group()
+        .accessibility_label("Text color")
+        .items_center()
+        .gap(px(4.0))
+        .px(px(2.0))
+        .child(dot(None, None, "Default text color".into()))
+        .children(actions::COLORS.iter().map(|(css, class, rgb)| dot(Some(css), Some(*rgb), color_name(class))))
+        .into_element()
+}
+
+/// "More": a native menu with the slots that didn't fit, by group.
+fn more_button(ctx: Ctx, hidden: Vec<Vec<Slot>>) -> AnyElement {
+    let hidden = Rc::new(hidden);
+    let button = nsh_base::button().accessibility_label("More formatting").on_press(move || {
+        let mut items = Vec::new();
+        for (i, group) in hidden.iter().enumerate() {
+            if i > 0 {
+                items.push(MenuItem::separator());
+            }
+            for slot in group {
+                items.push(match *slot {
+                    Slot::Action(action) => MenuItem::new(action.label)
+                        .checked(untracked(|| ctx.is_active(action)))
+                        .disabled(!untracked(|| ctx.is_enabled(action)))
+                        .on_select(move || ctx.perform(action)),
+                    Slot::Colors => MenuItem::submenu(
+                        "Text color",
+                        std::iter::once(MenuItem::new("Default").on_select(move || set_color(ctx, None))).chain(
+                            actions::COLORS.iter().map(move |(css, class, _)| {
+                                MenuItem::new(color_name(class)).on_select(move || set_color(ctx, Some(css)))
+                            }),
+                        ),
+                    ),
+                });
+            }
+        }
+        let _ = popup_menu(items);
+    });
+    tool_look!(button, || false, || true)
+        .child(hinted(hint("More", ""), text("⋯").text_size(px(15.0)).text_color(move || theme().foreground)))
+        .into_element()
 }
 
 // ----- The slash menu ---------------------------------------------------------
@@ -175,6 +389,7 @@ enum Edge {
 /// filtered by what's typed after it; ↑ ↓ move, Enter or Tab picks, a click
 /// picks. `window_height` keeps it inside the window.
 pub fn slash_menu(ctx: Ctx, window_height: Signal<f32>) -> impl IntoElement {
+    let window = nsh_core::element::desktop::current_window();
     let index = signal(0_usize);
     let keys_seen = signal(0_u64);
     // Set only when the `/` or its query changes, so the menu isn't built
@@ -211,9 +426,16 @@ pub fn slash_menu(ctx: Ctx, window_height: Signal<f32>) -> impl IntoElement {
             _ => {}
         }
     });
+    // Right after the `/` is typed its line isn't laid out yet, so its place
+    // isn't known: ask again a frame later.
+    let retry = signal(0_u32);
     dynamic(move || {
+        retry.get();
         let (from, _) = open.get()?;
-        let caret = ctx.editor.with_untracked(|e| e.session.page_coords_at_pos(from))?;
+        let Some(caret) = ctx.editor.with_untracked(|e| e.session.page_coords_at_pos(from)) else {
+            let _ = set_timeout(std::time::Duration::from_millis(16), move || retry.update(|n| *n += 1));
+            return None;
+        };
         let below = caret.origin.y.0 + caret.size.height.0 + 4.0;
         let height = window_height.get();
         let edge = if below + SLASH_MENU_MAX_HEIGHT <= height || caret.origin.y.0 < height / 2.0 {
@@ -230,7 +452,17 @@ pub fn slash_menu(ctx: Ctx, window_height: Signal<f32>) -> impl IntoElement {
                 row.reveal(RevealOptions::default().vertical(ScrollAlignment::Nearest).animated(false));
             }
         });
-        let menu = popup().left(px(caret.origin.x.0)).w(px(260.0));
+        // In a small note the menu moves left and narrows to stay inside the
+        // window (it can't be drawn outside it).
+        let window_width = window.state().map(|s| s.bounds.size.width.0).unwrap_or(f32::MAX);
+        let menu_width = 260.0_f32.min(window_width - 8.0);
+        let left = caret.origin.x.0.min(window_width - menu_width - 4.0).max(4.0);
+        let room = match edge {
+            Edge::Top(top) => height - top - 8.0,
+            Edge::Bottom(bottom) => height - bottom - 8.0,
+        };
+        let max_height = (SLASH_MENU_MAX_HEIGHT - 10.0).min(room.max(72.0));
+        let menu = popup().left(px(left)).w(px(menu_width));
         let menu = match edge {
             Edge::Top(top) => menu.top(px(top)),
             Edge::Bottom(bottom) => menu.bottom(px(bottom)),
@@ -245,7 +477,7 @@ pub fn slash_menu(ctx: Ctx, window_height: Signal<f32>) -> impl IntoElement {
             // The cap goes on the scroll view itself, so it scrolls rather
             // than growing.
             scroll()
-                .max_h(px(SLASH_MENU_MAX_HEIGHT - 10.0))
+                .max_h(px(max_height))
                 .children(found.into_iter().enumerate().map(|(i, action)| {
                     menu_row(action, move || index.get() == i, move || index.set(i), move || pick(action))
                         .element_ref(&rows[i])
@@ -311,6 +543,9 @@ fn menu_row(
 /// bold/italic/underline/strike, indent, link, and "…" for the rest. It
 /// turns into a link editor for "Link".
 pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
+    // The menu can't be drawn outside its window: in a small note it wraps.
+    let window = nsh_core::element::desktop::current_window();
+    let fit = move || window.state().map(|s| s.bounds.size.width.0 - 12.0).unwrap_or(400.0);
     let more = signal(false);
     let link = signal(String::new());
     // A new selection closes "…" and the link editor.
@@ -345,7 +580,9 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
         if !visible() {
             return None;
         }
+        let fit = fit();
         let surface = view()
+            .max_w(px(fit))
             .p(px(4.0))
             .gap(px(4.0))
             .rounded(px(10.0))
@@ -358,7 +595,7 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
                 surface
                     .flex_row()
                     .items_center()
-                    .w(px(380.0))
+                    .w(px(380.0_f32.min(fit)))
                     .child(
                         nsh_core::element::input()
                             .flex_1()
@@ -383,7 +620,7 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
                     .into_element(),
             );
         }
-        let mut row = view().flex_row().items_center().gap(px(2.0));
+        let mut row = view().flex_row().flex_wrap().items_center().gap(px(2.0));
         for (i, group) in actions::SELECTION.iter().enumerate() {
             if i > 0 {
                 row = row.child(separator());
@@ -435,56 +672,116 @@ fn normalize_href(text: &str) -> String {
 
 // ----- How the document looks ------------------------------------------------------
 
+/// How a note's text is drawn where it shows: its colour (`None`: the
+/// theme's), its size in points, its font family (empty: the app's), and
+/// whether it's in a small floating note (tighter margins).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextLook {
+    pub color: Option<u32>,
+    pub size: f32,
+    pub font: String,
+    pub compact: bool,
+}
+
+/// The colours the document's details are drawn in (borders, code
+/// backgrounds, muted text, links), as class fragments after `text-`,
+/// `bg-` or `border-`. On a note they're the note's own text colour made
+/// translucent, so they read on any background colour; elsewhere (`None`)
+/// they're the theme's.
+struct Inks {
+    /// Muted text: placeholders, list markers, quotes.
+    muted: String,
+    /// A faint fill: inline code, code blocks, table headers.
+    fill: String,
+    /// Lines: quote bars, rules, table borders, checkboxes.
+    line: String,
+    /// A checked checkbox.
+    checked: String,
+    link: &'static str,
+}
+
+impl Inks {
+    fn for_color(color: Option<u32>) -> Self {
+        match color {
+            Some(rgb) => {
+                // Light text means a dark note: a lighter blue for links.
+                let (r, g, b) = ((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+                let light_text = 299 * r + 587 * g + 114 * b > 128_000;
+                Self {
+                    muted: format!("[color:#{rgb:06x}]/65"),
+                    fill: format!("[#{rgb:06x}]/10"),
+                    line: format!("[#{rgb:06x}]/25"),
+                    checked: format!("[#{rgb:06x}]/70"),
+                    link: if light_text { "sky-300" } else { "blue-700" },
+                }
+            }
+            None => Self {
+                muted: "muted-foreground".into(),
+                fill: "muted".into(),
+                line: "border".into(),
+                checked: "primary".into(),
+                link: "primary",
+            },
+        }
+    }
+}
+
 /// The editor's classes: NSH's editor draws nothing of its own, so every
 /// node and mark gets its look here (after NSH's gallery look).
-pub fn editor_classes() -> RichEditorClasses {
-    let map = |pairs: &mut dyn Iterator<Item = (&str, &str)>| -> BTreeMap<String, String> {
-        pairs.map(|(k, v)| (k.to_string(), v.to_string())).collect()
-    };
+pub fn editor_classes(look: &TextLook) -> RichEditorClasses {
     let mut classes = RichEditorClasses::default();
-    classes.content = Some("gap-3 px-2 py-5".into());
-    classes.placeholder = Some("text-muted-foreground".into());
-    classes.list_marker = Some("text-muted-foreground".into());
+    let mut content = String::from(if look.compact { "gap-2 px-1.5 pt-0.5 pb-3" } else { "gap-3 px-2 py-5" });
+    content.push_str(&format!(" text-[length:{}px]", look.size));
+    if let Some(color) = look.color {
+        content.push_str(&format!(" text-[color:#{color:06x}]"));
+    }
+    if !look.font.is_empty() {
+        content.push_str(&format!(" font-[family-name:'{}']", look.font.replace('\'', "").replace(' ', "_")));
+    }
+    let Inks { muted, fill, line, checked, link } = Inks::for_color(look.color);
+    classes.content = Some(content.into());
+    classes.placeholder = Some(format!("text-{muted}").into());
+    classes.list_marker = Some(format!("text-{muted}").into());
     classes.task_checkbox =
-        Some("size-4 mr-2 mt-1 rounded border border-border checked:bg-primary checked:border-primary".into());
-    let nodes: &[(&str, &str)] = &[
-        ("paragraph", "leading-relaxed"),
-        ("heading[level=1]", "text-3xl font-bold tracking-tight"),
-        ("heading[level=2]", "text-2xl font-semibold tracking-tight"),
-        ("heading[level=3]", "text-xl font-semibold"),
-        ("blockquote", "border-l-4 border-border pl-4 text-muted-foreground italic"),
-        ("codeBlock", "font-mono text-sm bg-muted rounded-lg px-4 py-3"),
-        ("bulletList", "gap-1.5 pl-6"),
-        ("orderedList", "gap-1.5 pl-6"),
-        ("taskList", "gap-1.5"),
-        ("horizontalRule", "h-px bg-border my-3"),
-        ("image", "rounded-lg max-w-full"),
-        ("table", "border border-border rounded"),
-        ("tableHeader", "font-semibold bg-muted px-3 py-1.5 border border-border"),
-        ("tableCell", "px-3 py-1.5 border border-border"),
+        Some(format!("size-4 mr-2 mt-1 rounded border border-{line} checked:bg-{checked} checked:border-{checked}").into());
+    let nodes: Vec<(&str, String)> = vec![
+        ("paragraph", "leading-relaxed".into()),
+        ("heading[level=1]", "text-3xl font-bold tracking-tight".into()),
+        ("heading[level=2]", "text-2xl font-semibold tracking-tight".into()),
+        ("heading[level=3]", "text-xl font-semibold".into()),
+        ("blockquote", format!("border-l-4 border-{line} pl-4 text-{muted} italic")),
+        ("codeBlock", format!("font-mono text-sm bg-{fill} rounded-lg px-4 py-3")),
+        ("bulletList", "gap-1.5 pl-6".into()),
+        ("orderedList", "gap-1.5 pl-6".into()),
+        ("taskList", "gap-1.5".into()),
+        ("horizontalRule", format!("h-px bg-{line} my-3")),
+        ("image", "rounded-lg max-w-full".into()),
+        ("table", format!("border border-{line} rounded")),
+        ("tableHeader", format!("font-semibold bg-{fill} px-3 py-1.5 border border-{line}")),
+        ("tableCell", format!("px-3 py-1.5 border border-{line}")),
         // Alignment is an attribute of paragraphs and headings.
-        ("paragraph[textAlign=center]", "text-center"),
-        ("paragraph[textAlign=right]", "text-right"),
-        ("heading[textAlign=center]", "text-center"),
-        ("heading[textAlign=right]", "text-right"),
+        ("paragraph[textAlign=center]", "text-center".into()),
+        ("paragraph[textAlign=right]", "text-right".into()),
+        ("heading[textAlign=center]", "text-center".into()),
+        ("heading[textAlign=right]", "text-right".into()),
     ];
-    classes.nodes = Some(map(&mut nodes.iter().chain(toggle::CLASSES).copied()));
-    let marks: &[(&str, &str)] = &[
-        ("bold", "font-bold"),
-        ("italic", "italic"),
-        ("underline", "underline"),
-        ("strike", "line-through"),
-        ("code", "font-mono text-sm bg-muted rounded px-1"),
-        ("link", "text-primary underline"),
-        ("highlight", "bg-yellow-200 text-black rounded-sm"),
+    let toggles = toggle::CLASSES.iter().map(|(k, v)| (*k, v.to_string()));
+    classes.nodes = Some(nodes.into_iter().chain(toggles).map(|(k, v)| (k.to_string(), v)).collect::<BTreeMap<_, _>>());
+    let marks: Vec<(String, String)> = vec![
+        ("bold".into(), "font-bold".into()),
+        ("italic".into(), "italic".into()),
+        ("underline".into(), "underline".into()),
+        ("strike".into(), "line-through".into()),
+        ("code".into(), format!("font-mono text-sm bg-{fill} rounded px-1")),
+        ("link".into(), format!("text-{link} underline")),
+        // Its own dark text: readable on any note.
+        ("highlight".into(), "bg-yellow-200 text-black rounded-sm".into()),
         // NSH's text layout doesn't shift the baseline: smaller text.
-        ("subscript", "text-xs"),
-        ("superscript", "text-xs"),
+        ("subscript".into(), "text-xs".into()),
+        ("superscript".into(), "text-xs".into()),
     ];
     // Text color is `textStyle`'s `color`: a class per catalog color.
-    let colors: Vec<(String, &str)> =
-        actions::COLORS.iter().map(|(css, class, _)| (format!("textStyle[color={css}]"), *class)).collect();
-    let mut all = marks.iter().copied().map(|(k, v)| (k.to_string(), v)).chain(colors);
-    classes.marks = Some(std::iter::from_fn(|| all.next()).map(|(k, v)| (k, v.to_string())).collect());
+    let colors = actions::COLORS.iter().map(|(css, class, _)| (format!("textStyle[color={css}]"), class.to_string()));
+    classes.marks = Some(marks.into_iter().chain(colors).collect());
     classes
 }

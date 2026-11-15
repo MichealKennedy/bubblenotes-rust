@@ -1,52 +1,57 @@
-# Rich Notes
+# Bubble Notes
 
-A WYSIWYG rich-text note editor built with [NSH](https://nsh.dev), in Rust. You edit formatted text directly; it's built on NSH's `RichEditor`, a Rust port of ProseMirror with Tiptap's extensions.
+Floating notes for the Windows desktop, built with [NSH](https://nsh.dev), in Rust. The app lives in the tray; each note is a small frameless window of its own, and the Notes Manager lists every note by category.
 
 ## Features
 
-- **Selection menu** (select text): bulleted, numbered, check and toggle lists; bold, italic, underline, strikethrough; decrease/increase indent; link (an inline URL box; Ctrl/⌘+K too); **…** for Insert (table, image, divider, code block, quote) and Format (inline code, highlight, clear formatting)
-- **Slash menu:** type `/` at a line's start or after a space; filter as you type (`/h2`, `/todo`, `/tog`); ↑ ↓, Enter or Tab, Esc, or click
-- **Toggles:** collapsible blocks with a title and body; the arrow folds them. Saved in HTML as `<details>`
-- **Images:** inserted from anywhere on your computer; on save they're copied into `attachments/` next to the note and linked by relative path (works in browsers, Obsidian, GitHub)
-- **Typing shortcuts:** `## `, `- `, `1. `, `[ ] `, `> `, ```` ``` ````, `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``
-- **Toolbar** with everything above plus headings, highlight, sub/superscript, text color, alignment, undo/redo; buttons show what's active and dim when they can't apply
-- **Files:** Markdown (`.md`) or HTML (`.html`) by extension; `.txt` opens as text. Saving as Markdown checks whether Markdown can hold the note and, if not, says what it would drop (toggles, underline, highlight, color, alignment…) and offers HTML
+- **Floating notes:** rounded, frameless, any colour or gradient, see-through backgrounds. Drag the title to move (snaps to screen edges), the corner grip to resize, double-click the title to roll a note up
+- **Right-click menu** on every note: always on top, lock, show title, sleep, alarm, move to a category, theme, duplicate, copy and paste, copy as Markdown, export, arrange
+- **Edit configuration:** a panel beside the note with its colours, text and title styling, transparency, sleep, alarm and bubble settings. Changes apply at once
+- **Bubbles:** a note can show as a small bubble (glossy sphere, circle, square, triangle or an emoji) that opens into the note on hover or click, to any side
+- **Sleep and alarms:** a sleeping note hides until its time; an alarm shows the note with a notification and a sound, and can repeat
+- **Notes Manager:** category tree, full-text search, trash, the full formatting toolbar
+- **Tray icon:** click to show or hide all notes; right-click for New Note, Show All, Hide All, Notes Manager, Options, Exit
+- **Rich text:** type `/` for headings, checklists, toggles, tables and more; select text to format it; Markdown shortcuts as you type
+- **Images and YouTube:** paste or drop images into a note; a pasted YouTube link becomes a card that opens the video in your browser
+- **Global shortcuts:** new note (Ctrl+Alt+N), new note from the clipboard (Ctrl+Alt+V), show or hide all notes (Ctrl+Alt+H); change them in Options
 
-Shortcuts: Ctrl/⌘+N, O, S; Ctrl/⌘+K link; the editor's own (B, I, U, E code, Shift+S strike, Shift+H highlight, Shift+L/E/R align, Z/Shift+Z undo/redo; Tab/Shift+Tab indent in lists).
+## Where notes are kept
+
+`Documents/Bubble Notes`: one HTML file per note, a folder per category, images in `attachments/`. Notes save as you type. HTML files you add to the folder become notes; `.bubblenotes/index.json` holds looks, positions, alarms and settings, and `.bubblenotes/trash/` holds deleted notes for 30 days.
 
 ## Run and test
 
 ```sh
 cargo run
-cargo test       # formats, losses, toggles through HTML, image copying, the action catalog
+cargo test
 ```
 
-Rust 1.97+ (`rustup update stable`). Windows: Visual Studio Build Tools with the C++ workload (for Rust's linker; LLVM is no longer needed). Linux: GTK 4.14+ and GStreamer development packages. macOS 14+ with Xcode command line tools.
+Rust 1.97+ (`rustup update stable`). Windows: Visual Studio Build Tools with the C++ workload. The app is built for Windows; the Linux and macOS backends are declared but untested.
+
+For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize` does that to a note two seconds after start (for checking without the mouse).
 
 ## Code map
 
 | Module | What |
 |---|---|
-| `kit.rs` | The editor setup, **built once**: schema, plugins, named commands; each open note is an `Editor` (its own session over the shared kit). `Relay` carries what the editor reports from other threads (file shortcuts, state changes) to the app |
-| `actions.rs` | **Every editing action, once** (name, glyph, hint, search words, what it runs, when it's active or enabled). The toolbar, slash menu, selection menu and its "…" menu are lists of ids |
-| `toggle.rs` | The toggle block: three node types, their HTML, the arrow (a node view), and "turn this block into a toggle" |
-| `slash.rs` | The slash menu's plugin (NSH's port of Tiptap's `Suggestion`) |
-| `formats.rs` | Markdown/HTML/text, the Markdown loss check, image paths (absolute while open, relative on disk); unit tests |
-| `files.rs` | New, open, save (with the Markdown check), insert image, copying images into `attachments/` |
-| `ui.rs` | Toolbar, slash menu, selection menu (link editor, "…"), buttons, and the document's look (NSH's editor draws nothing itself) |
-| `lib.rs` | The window: wires the pieces together |
-
-Adding an action: one line in `ACTIONS`, then its id in whichever menus should show it.
+| `model.rs` | What's saved about a note (look, bubble, alarm, position) and the settings: plain data |
+| `store.rs` | The notes folder on disk: files, categories, index, trash |
+| `app.rs` | The shared state every window uses (`App`, `Note`) and what changes it; autosave |
+| `note_window.rs`, `bubble.rs` | A note floating on the desktop; a note shown as a bubble |
+| `note_menu.rs` | A note's right-click menu and what its items do |
+| `config_panel.rs` | "Edit configuration", beside a note |
+| `manager.rs` | The Notes Manager window |
+| `tray.rs`, `options.rs` | The tray icon and its menu; the Options window |
+| `alarms.rs`, `system.rs` | Sleep and alarms; global shortcuts and starting with Windows |
+| `editor_view.rs`, `media.rs` | A note's text as an editor element; pasted images and YouTube cards |
+| `kit.rs`, `actions.rs`, `toggle.rs`, `slash.rs`, `formats.rs`, `ui.rs` | The editor: schema and plugins, the action catalog, toggle blocks, the slash menu, Markdown/HTML, toolbar and menus |
+| `drag.rs`, `win.rs` | Moving windows by hand; the few things asked of Windows directly |
 
 ## Things worth knowing
 
-- **One schema for every note.** A document's node types belong to the schema instance that made them, and an editor can't edit another schema's document (edits are silently refused). `Kit` is built once for that reason
-- **Plugin order matters:** the slash plugin goes first, so its Enter comes before the keymap's
-- **No Save As shortcut:** Ctrl/⌘+Shift+S is strikethrough, as in Notion and Tiptap. Save As is a toolbar button
-- **Indent** applies to list items (Markdown and the editor's model have no indented paragraphs)
-- **Markdown normalizes a little** on save: table separators are re-spaced; GitHub callouts (`> [!NOTE]`) are escaped
-- **Sub/superscript** show as smaller text (NSH's layout doesn't shift the baseline); code blocks aren't syntax-highlighted
-
-## Is it 100% Rust?
-
-The app and everything compiled into it are Rust: no JavaScript engine, no web view, and no C compiled from source. What it does use is the operating system's own UI libraries, as any native app must: GTK 4 and GStreamer on Linux (C libraries, through Rust bindings), AppKit on macOS, Win32 on Windows.
+- **The main window never shows.** NSH ends the app when its main window closes, so it stays hidden and hosts the tray, the menus and every other window
+- **Note windows are see-through**, which rules out a system shadow and click-through: a window's bounds are always exactly what's visible
+- **Notes are dragged by the app, not the system** (`drag.rs`): a system drag region swallows clicks, and this way double-click rolls a note up and the configuration panel follows along
+- **One editor session per note**, shown by both the floating note and the manager, so they always agree
+- **No video inside notes:** NSH 0.5.1's web view draws only in the main window, so YouTube links open in the browser
+- **Right-click menus are native**: a drawn menu would be clipped by a small note's window

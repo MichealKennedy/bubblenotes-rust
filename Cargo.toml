@@ -1,5 +1,5 @@
 [package]
-name = "nsh-app-richnotes"
+name = "nsh-app-bubblenotes"
 version = "0.1.0"
 edition = "2024"
 # NSH 0.5.1 needs Rust 1.97 or newer (`rustup update stable`).
@@ -11,16 +11,19 @@ publish = false
 [dependencies]
 nsh-core = "0.5.1"
 # Only the rich-text editor: no code editor, syntax highlighting or JS runtime.
-nsh-base = { version = "0.5.1", default-features = false, features = ["rich-editor"] }
+nsh-base = { version = "0.5.1", default-features = false, features = ["rich-editor", "emoji-picker"] }
 env_logger = "0.11"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Local dates and times, for alarms.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # The desktop backends `cargo run` uses (GTK 4, AppKit, Win32).
 [target.'cfg(target_os = "linux")'.dependencies]
-nsh-platform-linux = { version = "0.5.1", default-features = false, features = ["rich-editor"] }
+nsh-platform-linux = { version = "0.5.1", default-features = false, features = ["rich-editor", "emoji-picker"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-nsh-platform-macos = { version = "0.5.1", default-features = false, features = ["rich-editor"] }
+nsh-platform-macos = { version = "0.5.1", default-features = false, features = ["rich-editor", "emoji-picker"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-nsh-platform-windows = { version = "0.5.1", default-features = false, features = ["rich-editor"] }
+nsh-platform-windows = { version = "0.5.1", default-features = false, features = ["rich-editor", "emoji-picker"] }
