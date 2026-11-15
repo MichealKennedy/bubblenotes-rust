@@ -32,7 +32,7 @@ pub fn snapped(rect: Rect, screens: &[Rect], notes: &[Rect]) -> Rect {
     // (how far to move, in x), (in y)
     let mut dx: Option<f32> = None;
     let mut dy: Option<f32> = None;
-    let mut offer = |slot: &mut Option<f32>, delta: f32| {
+    let offer = |slot: &mut Option<f32>, delta: f32| {
         if delta.abs() <= SNAP && slot.is_none_or(|best| delta.abs() < best.abs()) {
             *slot = Some(delta);
         }

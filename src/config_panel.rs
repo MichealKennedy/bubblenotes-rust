@@ -448,7 +448,7 @@ fn title_part(app: App, note: Note) -> impl IntoElement {
 
 fn text_part(app: App, note: Note) -> impl IntoElement {
     let meta = note.meta;
-    let (n1, n2, n3, n4) = (note.clone(), note.clone(), note.clone(), note.clone());
+    let (n1, n2, n3) = (note.clone(), note.clone(), note.clone());
     let mut fonts = vec![("", "Default")];
     fonts.extend(FONTS.iter().map(|f| (*f, *f)));
     view()
