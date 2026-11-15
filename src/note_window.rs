@@ -177,7 +177,7 @@ pub fn card(app: App, note: Note) -> impl IntoElement {
         .style_when(move || meta.with(|m| m.rolled_up), |s| s.hidden())
         .child(editor_view::note_editor(ctx, move || !meta.with(|m| m.locked), "Type here…", move || {
             let look = look();
-            TextLook { color: Some(look.body_color), size: look.body_size, font: look.body_font, compact: true }
+            TextLook { color: Some(look.body_color), selection: app.settings.with(|s| s.selection_strength), size: look.body_size, font: look.body_font, compact: true }
         }));
 
     view()

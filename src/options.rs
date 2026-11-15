@@ -114,6 +114,25 @@ fn general_card(app: App) -> impl IntoElement {
                     .increment_button(text("+").text_size(px(11.0)))
                     .decrement_button_class("hidden")
                     .increment_button_class("hidden"),
+            ))
+            .child(row(
+                "Selected text darkness (%)",
+                number_input()
+                    .min(10.0)
+                    .max(80.0)
+                    .step(5.0)
+                    .accessibility_label("How dark selected text is")
+                    .value(move || Some(settings.with(|s| s.selection_strength) as f64))
+                    .on_change(move |v: &Option<f64>| {
+                        if let Some(percent) = v {
+                            app.update_settings(|s| s.selection_strength = percent.clamp(10.0, 80.0) as u32);
+                        }
+                    })
+                    .input_class("w-16 h-7 px-2 rounded-md border border-input bg-background text-sm text-foreground")
+                    .decrement_button(text("−").text_size(px(11.0)))
+                    .increment_button(text("+").text_size(px(11.0)))
+                    .decrement_button_class("hidden")
+                    .increment_button_class("hidden"),
             )),
     )
 }

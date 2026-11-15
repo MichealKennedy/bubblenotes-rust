@@ -678,8 +678,9 @@ fn note_view(m: Manager, note: Note) -> impl IntoElement {
                 .child(ui::toolbar(ctx)),
         )
         .child(
-            view().flex_1().min_h(px(0.0)).px(px(22.0)).child(editor_view::note_editor(ctx, move || !trashed(), "Start writing…", || TextLook {
+            view().flex_1().min_h(px(0.0)).px(px(22.0)).child(editor_view::note_editor(ctx, move || !trashed(), "Start writing…", move || TextLook {
                 color: None,
+                selection: app.settings.with(|s| s.selection_strength),
                 size: 15.0,
                 font: String::new(),
                 compact: false,

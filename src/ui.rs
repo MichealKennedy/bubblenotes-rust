@@ -399,12 +399,19 @@ pub fn slash_menu(ctx: Ctx, window_height: Signal<f32>) -> impl IntoElement {
     // again (and its scroll reset) on every change of the editor's state.
     let open = signal(None::<(usize, String)>);
     let items = move || open.get().map(|(_, q)| actions::slash_matches(&q)).unwrap_or_default();
+    // The delayed step below runs under this owner: started from a press
+    // handler alone it would be dropped before it ran.
+    let owner = Owner::current();
     let pick = move |action: &'static Action| {
         ctx.editor.with_untracked(slash::remove_query);
         ctx.perform(action);
         // A click on the menu takes the focus from the text as it ends:
         // give it back once it has.
-        let _ = set_timeout(std::time::Duration::from_millis(40), move || ctx.editor.with_untracked(|e| e.session.focus()));
+        owner.run(|| {
+            let _ = set_timeout(std::time::Duration::from_millis(60), move || {
+                ctx.editor.with_untracked(|e| e.session.focus());
+            });
+        });
     };
     // Where the pointer last was over the menu: rows follow it only when it
     // really moves, so a row sliding under a resting pointer (the menu
@@ -534,6 +541,10 @@ fn menu_row(
         .rounded(px(6.0))
         .bg(move || if highlighted() { theme().accent } else { theme().popover })
         .on_mouse_move(move |e: &MouseEvent| hover((e.page_position.x.0, e.page_position.y.0)))
+        // Not a stop of the keyboard focus: a press leaves the focus in the
+        // text, so typing goes on after picking (a row that took it would
+        // take it away with it when the menu closes).
+        .focusable(false)
         .on_press(press)
         .child(
             view()
@@ -695,6 +706,8 @@ fn normalize_href(text: &str) -> String {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLook {
     pub color: Option<u32>,
+    /// How dark selected text's background is, in percent.
+    pub selection: u32,
     pub size: f32,
     pub font: String,
     pub compact: bool,
@@ -757,6 +770,13 @@ pub fn editor_classes(look: &TextLook) -> RichEditorClasses {
     }
     let Inks { muted, fill, line, checked, link } = Inks::for_color(look.color);
     classes.content = Some(content.into());
+    // Selected text: the text's own colour, see-through, so it reads on any
+    // note colour.
+    let strength = look.selection.clamp(5, 90);
+    classes.selection = Some(match look.color {
+        Some(color) => format!("bg-[#{color:06x}]/{strength}").into(),
+        None => format!("bg-primary/{strength}").into(),
+    });
     classes.placeholder = Some(format!("text-{muted}").into());
     classes.list_marker = Some(format!("text-{muted}").into());
     classes.task_checkbox =

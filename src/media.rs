@@ -481,6 +481,11 @@ impl NodeView for ImageView {
                         let Some(now) = win::cursor() else { break };
                         dragged.set(Some((from + (now.0 - start.0) / scale).max(MIN_IMAGE_WIDTH)));
                     }
+                    // Where the pointer ended up, also when the drag was
+                    // over before the first look at it.
+                    if let Some(now) = win::cursor() {
+                        dragged.set(Some((from + (now.0 - start.0) / scale).max(MIN_IMAGE_WIDTH)));
+                    }
                     let to = untracked(size).0.round();
                     if (to - from).abs() >= 1.0
                         && let Some(pos) = get_pos()
@@ -511,7 +516,9 @@ impl NodeView for ImageView {
             .bg(nsh_core::Color(0xffffffee))
             .cursor(Cursor::NwseResize)
             .label("Resize image")
-            .style_when(move || !hovered.get() && dragged.get().is_none(), |s| s.hidden())
+            // Unseen rather than gone until the pointer is over the image, so
+            // a press that arrives with the pointer still lands on it.
+            .style_when(move || !hovered.get() && dragged.get().is_none(), |s| s.opacity(0.0))
             .on_press_down(resize);
         view()
             .relative()

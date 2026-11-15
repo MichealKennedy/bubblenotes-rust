@@ -61,7 +61,38 @@ impl Format {
 /// The document as HTML without a page around it: what a note's file holds
 /// inside its `<body>`, and what goes on the clipboard.
 pub fn html_fragment(doc: &Node) -> Result<String, String> {
-    HtmlFormat::default().serialize(doc).map_err(|e| e.to_string())
+    HtmlFormat::default().serialize(doc).map(|html| with_image_widths(&html, doc)).map_err(|e| e.to_string())
+}
+
+/// `html` with each image's width written on its `<img>`. NSH's editor
+/// reads an image's `width` from HTML but doesn't write it, so a resized
+/// image would be back at its full size the next time its note opens.
+fn with_image_widths(html: &str, doc: &Node) -> String {
+    // The images' widths, in the order their tags come.
+    let mut widths = Vec::new();
+    doc.descendants(&mut |node, _, _, _| {
+        if node.ty().name() == "image" {
+            let width = node.attrs().get("width").and_then(|w| w.as_f64().or_else(|| w.as_str().and_then(|s| s.parse().ok())));
+            widths.push(width.filter(|w| *w > 0.0));
+        }
+        true
+    });
+    if widths.iter().all(Option::is_none) {
+        return html.to_string();
+    }
+    let mut out = String::with_capacity(html.len() + widths.len() * 16);
+    let mut rest = html;
+    let mut widths = widths.into_iter();
+    while let Some(at) = rest.find("<img") {
+        let tag_end = at + "<img".len();
+        out.push_str(&rest[..tag_end]);
+        if let Some(Some(width)) = widths.next() {
+            out.push_str(&format!(" width=\"{}\"", width.round() as i64));
+        }
+        rest = &rest[tag_end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn markdown() -> MarkdownFormat {
@@ -291,6 +322,18 @@ mod tests {
 
     fn schema() -> Schema {
         Kit::new(Relay::default()).schema.clone()
+    }
+
+    #[test]
+    fn a_resized_image_keeps_its_width_in_the_note_file() {
+        let schema = schema();
+        let html = r#"<p><img src="a.png" alt="a"> and <img src="b.png" width="120"></p>"#;
+        let doc = Format::Html.parse(&schema, html).unwrap();
+        let saved = html_fragment(&doc).unwrap();
+        assert!(saved.contains(r#"<img width="120" src="b.png""#), "{saved}");
+        assert!(!saved.contains(r#"<img width="120" src="a.png""#) && saved.matches("width=").count() == 1, "{saved}");
+        let again = Format::Html.parse(&schema, &saved).unwrap();
+        assert_eq!(html_fragment(&again).unwrap(), saved);
     }
 
     #[test]

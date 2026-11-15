@@ -291,6 +291,9 @@ pub struct Settings {
     /// Days a deleted note stays in the trash.
     pub trash_days: u32,
     pub snap_to_edges: bool,
+    /// How dark selected text's background is, in percent of the text's
+    /// colour.
+    pub selection_strength: u32,
 }
 
 impl Default for Settings {
@@ -306,6 +309,7 @@ impl Default for Settings {
             notes_shown: true,
             trash_days: 30,
             snap_to_edges: true,
+            selection_strength: 35,
         }
     }
 }
