@@ -56,6 +56,11 @@ enum Arrange {
 #[derive(Clone, Debug, PartialEq)]
 enum Action {
     NewNote,
+    /// A new note from the template with this id.
+    FromTemplate(String),
+    SaveTemplate,
+    /// Show the note only with this program (`None`: always).
+    Pin(Option<String>),
     EditConfiguration,
     ViewMarkdown,
     SendToBack,
@@ -141,17 +146,30 @@ struct MenuState<'a> {
     markdown_shown: bool,
     categories: &'a [String],
     user_themes: &'a [Theme],
+    /// The templates: their ids and titles.
+    templates: &'a [(String, String)],
+    /// The program in front before this note was clicked ("" when unknown).
+    front_app: &'a str,
 }
 
 /// The note's menu, as data.
 fn entries(s: &MenuState) -> Vec<Entry> {
     let m = s.meta;
-    let mut out = vec![
-        item("New Note", Action::NewNote),
+    let mut out = vec![item("New Note", Action::NewNote)];
+    if !s.templates.is_empty() {
+        out.push(submenu("New from Template", s.templates.iter().map(|(id, title)| item(title.clone(), Action::FromTemplate(id.clone()))).collect()));
+    }
+    out.extend([
         item("Edit configuration…", Action::EditConfiguration),
         item("View as markdown", Action::ViewMarkdown).checked(s.markdown_shown),
         Entry::Separator,
-    ];
+    ]);
+    // Pinned to a program: shown only while it's in front.
+    let pin = match &m.pinned_app {
+        Some(app) => item(format!("Show only with {app}"), Action::Pin(None)).checked(true),
+        None if s.front_app.is_empty() => item("Show only with a program", Action::Pin(None)).checked(false).disabled(true),
+        None => item(format!("Show only with {}", s.front_app), Action::Pin(Some(s.front_app.to_string()))).checked(false),
+    };
     if m.look.always_on_top {
         out.push(item("Send this note to back", Action::SendToBack).disabled(true));
         out.push(note_line("(but is always on top)"));
@@ -165,9 +183,11 @@ fn entries(s: &MenuState) -> Vec<Entry> {
         item("Show Title", Action::ShowTitle).checked(m.look.show_title),
         item("Lock Note", Action::Lock).checked(m.locked),
         item("Ghost (clicks pass through)", Action::Ghost).checked(m.ghost),
+        pin,
         item("Show as Bubble", Action::Bubble).checked(m.bubble.enabled),
         Entry::Separator,
         item("Duplicate Note", Action::Duplicate).shortcut("mod+d"),
+        item("Save as Template", Action::SaveTemplate),
         item("Copy Note", Action::CopyNote),
         item("Paste Note", Action::PasteNote).disabled(!s.can_paste),
         item("Copy text only", Action::CopyText),
@@ -293,6 +313,9 @@ pub fn show(app: App, note: &Note) {
     let categories = untracked(|| app.categories());
     let user_themes = app.settings.with_untracked(|s| s.themes.clone());
     let markdown_shown = global::<MarkdownFor>().with_untracked(|f| f.0.as_deref() == Some(&*note.id));
+    let templates: Vec<(String, String)> =
+        untracked(|| app.templates()).iter().map(|t| (t.id.to_string(), t.meta.with_untracked(|m| m.title.clone()))).collect();
+    let front_app = app.foreground_app.get_untracked();
     let state = MenuState {
         meta: &meta,
         now: store::now_ms(),
@@ -300,6 +323,8 @@ pub fn show(app: App, note: &Note) {
         markdown_shown,
         categories: &categories,
         user_themes: &user_themes,
+        templates: &templates,
+        front_app: &front_app,
     };
     let note = note.clone();
     let run: Rc<dyn Fn(Action)> = Rc::new(move |action| perform(app, &note, action));
@@ -314,6 +339,16 @@ fn perform(app: App, note: &Note, action: Action) {
             let category = note.meta.with_untracked(|m| m.category.clone());
             app.new_note(&category);
         }
+        Action::FromTemplate(template) => {
+            if let Some(template) = app.note(&template) {
+                let fresh = app.new_from_template(&template);
+                app.command.set(Some((fresh.id.clone(), NoteCommand::Focus)));
+            }
+        }
+        Action::SaveTemplate => {
+            app.save_as_template(note);
+        }
+        Action::Pin(program) => app.update(note, |m| m.pinned_app = program),
         Action::EditConfiguration => app.config_for.set(Some(id)),
         Action::ViewMarkdown => global::<MarkdownFor>().update(|f| f.0 = if f.0.as_deref() == Some(&*id) { None } else { Some(id) }),
         Action::SendToBack => app.command.set(Some((id, NoteCommand::SendToBack))),
@@ -703,7 +738,7 @@ mod tests {
     use super::*;
 
     fn state<'a>(meta: &'a NoteMeta, categories: &'a [String]) -> MenuState<'a> {
-        MenuState { meta, now: 1_000_000.0, can_paste: false, markdown_shown: false, categories, user_themes: &[] }
+        MenuState { meta, now: 1_000_000.0, can_paste: false, markdown_shown: false, categories, user_themes: &[], templates: &[], front_app: "" }
     }
 
     /// The labels at the top level ("---" for separators, "label >" for
@@ -754,9 +789,11 @@ mod tests {
                 "[x] Show Title",
                 "[ ] Lock Note",
                 "[ ] Ghost (clicks pass through)",
+                "[ ] Show only with a program (off)",
                 "[ ] Show as Bubble",
                 "---",
                 "Duplicate Note",
+                "Save as Template",
                 "Copy Note",
                 "Paste Note (off)",
                 "Copy text only",
@@ -783,7 +820,7 @@ mod tests {
         assert_eq!(labels(sub(&menu, "Arrange")), ["Cascade all notes", "Tile all notes", "Stack here", "Snap to nearest corner"]);
         // The shortcut is valid: `MenuItem::shortcut` would panic otherwise.
         let run: Rc<dyn Fn(Action)> = Rc::new(|_| {});
-        assert_eq!(to_menu(menu, &run).len(), 29);
+        assert_eq!(to_menu(menu, &run).len(), 31);
     }
 
     #[test]

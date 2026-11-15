@@ -17,7 +17,11 @@ Floating notes for the Windows desktop, built with [NSH](https://nsh.dev), in Ru
 - **Bubble badges:** a bubble shows the time to its note's alarm, or how many checklist items are done
 - **Snapping and rescue:** dragged notes snap to screen edges and to each other; notes left on an unplugged monitor come back
 - **Ghost notes:** a ghost note lets clicks through to what's under it; hold Ctrl+Alt to reach it again
-- **Global shortcuts:** new note (Ctrl+Alt+N), new note from the clipboard (Ctrl+Alt+V), show or hide all notes (Ctrl+Alt+H); change them in Options
+- **Quick search:** Ctrl+Alt+F opens a search box from anywhere; type, pick with the arrows, Enter brings the note up
+- **Templates:** "Save as Template" keeps a copy of a note in the Templates category; "New from Template" (tray and note menus) starts a note from one
+- **Pin to a program:** "Show only with …" in a note's menu shows the note only while that program is in front
+- **Colour by category:** right-click a category in the Notes Manager to choose the colour its new notes get (subcategories follow)
+- **Global shortcuts:** new note (Ctrl+Alt+N), new note from the clipboard (Ctrl+Alt+V), show or hide all notes (Ctrl+Alt+H), search (Ctrl+Alt+F); change them in Options
 
 ## Where notes are kept
 
@@ -32,7 +36,7 @@ cargo test
 
 Rust 1.97+ (`rustup update stable`). Windows: Visual Studio Build Tools with the C++ workload. The app is built for Windows; the Linux and macOS backends are declared but untested.
 
-For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize` does that to a note two seconds after start (for checking without the mouse).
+For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize` does that to a note two seconds after start (for checking without the mouse).
 
 ## Code map
 
@@ -45,7 +49,7 @@ For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets 
 | `note_menu.rs` | A note's right-click menu and what its items do |
 | `config_panel.rs` | "Edit configuration", beside a note |
 | `manager.rs` | The Notes Manager window |
-| `tray.rs`, `options.rs` | The tray icon and its menu; the Options window |
+| `tray.rs`, `options.rs`, `quick_search.rs` | The tray icon and its menu; the Options window; the quick search box |
 | `alarms.rs`, `system.rs` | Sleep and alarms; global shortcuts and starting with Windows |
 | `editor_view.rs`, `media.rs` | A note's text as an editor element; pasted images and YouTube cards |
 | `kit.rs`, `actions.rs`, `toggle.rs`, `slash.rs`, `formats.rs`, `ui.rs` | The editor: schema and plugins, the action catalog, toggle blocks, the slash menu, Markdown/HTML, toolbar and menus |

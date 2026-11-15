@@ -94,6 +94,12 @@ pub struct App {
     /// Something asked of a note's desktop window (its note's id, what).
     /// The window takes it and sets this back to `None`.
     pub command: Signal<Option<(Rc<str>, NoteCommand)>>,
+    /// The quick search box is open.
+    pub search_open: Signal<bool>,
+    /// The program in front, or the last one that was before this app came
+    /// in front (its file name in lower case; empty until one is known):
+    /// what notes pinned to a program follow.
+    pub foreground_app: Signal<String>,
     /// Ctrl+Alt is held: ghost notes take clicks for the while, so they
     /// can be moved, edited or made solid again.
     pub ghosts_solid: Signal<bool>,
@@ -130,6 +136,8 @@ impl App {
             options_open: signal(false),
             dragging: signal(None),
             command: signal(None),
+            search_open: signal(false),
+            foreground_app: signal(String::new()),
             ghosts_solid: signal(false),
             problem: signal(None),
             owner: Owner::current(),
@@ -214,7 +222,19 @@ impl App {
         }
         let now = self.now.get();
         self.notes.with(|notes| {
-            notes.iter().filter(|n| n.meta.with(|m| m.on_desktop && m.trashed.is_none() && !m.asleep(now))).cloned().collect()
+            notes
+                .iter()
+                .filter(|n| {
+                    n.meta.with(|m| {
+                        m.on_desktop
+                            && m.trashed.is_none()
+                            && !m.asleep(now)
+                            // A note pinned to a program shows with it.
+                            && m.pinned_app.as_ref().is_none_or(|app| self.foreground_app.with(|front| front == app))
+                    })
+                })
+                .cloned()
+                .collect()
         })
     }
 
@@ -280,7 +300,7 @@ impl App {
             category: category.into(),
             created: now,
             modified: now,
-            look: self.settings.with_untracked(|s| s.default_look.clone()),
+            look: self.settings.with_untracked(|s| s.look_for(category)),
             rect: Rect { x: 160.0 + step, y: 140.0 + step, ..Rect::default() },
             ..NoteMeta::default()
         };
@@ -305,6 +325,48 @@ impl App {
         meta.alarm = None;
         meta.sleep_until = None;
         self.add(meta, Some(note.editor.doc()))
+    }
+
+    /// The templates: the notes in the "Templates" category (read
+    /// reactively), by title.
+    pub fn templates(self) -> Vec<Note> {
+        let mut found: Vec<Note> = self.notes.with(|notes| {
+            notes.iter().filter(|n| n.meta.with(|m| m.trashed.is_none() && m.category == crate::model::TEMPLATES)).cloned().collect()
+        });
+        found.sort_by_key(|n| n.meta.with(|m| m.title.to_lowercase()));
+        found
+    }
+
+    /// Keeps a copy of `note` as a template (off the desktop).
+    pub fn save_as_template(self, note: &Note) -> Note {
+        let now = store::now_ms();
+        let mut meta = note.meta.get_untracked();
+        meta.id = store::new_id();
+        meta.file = String::new();
+        meta.category = crate::model::TEMPLATES.into();
+        meta.created = now;
+        meta.modified = now;
+        meta.on_desktop = false;
+        meta.alarm = None;
+        meta.sleep_until = None;
+        meta.pinned_app = None;
+        self.add(meta, Some(note.editor.doc()))
+    }
+
+    /// A new note on the desktop that starts as a copy of `template`: its
+    /// text, look and size.
+    pub fn new_from_template(self, template: &Note) -> Note {
+        let fresh = self.new_note("");
+        let from = template.meta.get_untracked();
+        self.set_doc(&fresh, template.editor.doc());
+        self.update(&fresh, |m| {
+            m.title = from.title.clone();
+            m.look = from.look.clone();
+            m.rect.w = from.rect.w;
+            m.rect.h = from.rect.h;
+            m.bubble = crate::model::Bubble { x: m.bubble.x, y: m.bubble.y, ..from.bubble.clone() };
+        });
+        fresh
     }
 
     /// Adds a note for `meta` (which needs an id but no file yet), with

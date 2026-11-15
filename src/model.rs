@@ -205,6 +205,9 @@ pub struct NoteMeta {
     /// Clicks go through the note to what's under it (it can only be
     /// looked at), until Ctrl+Alt is held.
     pub ghost: bool,
+    /// Shown only while this program is in front (its file name, in lower
+    /// case: `chrome.exe`); `None`: always.
+    pub pinned_app: Option<String>,
     pub look: Look,
     pub bubble: Bubble,
     /// Hidden until then (milliseconds since the Unix epoch).
@@ -228,6 +231,7 @@ impl Default for NoteMeta {
             rolled_up: false,
             locked: false,
             ghost: false,
+            pinned_app: None,
             look: Look::default(),
             bubble: Bubble::default(),
             sleep_until: None,
@@ -293,6 +297,11 @@ pub struct Settings {
     pub hotkey_clipboard_note: String,
     /// Global shortcut: show or hide every note.
     pub hotkey_toggle_notes: String,
+    /// Global shortcut: the quick search box.
+    pub hotkey_search: String,
+    /// The look new notes get in a category (by the category's path); a
+    /// category without one takes its parent's, then the default look.
+    pub category_looks: std::collections::BTreeMap<String, Look>,
     pub start_with_windows: bool,
     /// Notes on the desktop are shown (else all hidden, until "Show All").
     pub notes_shown: bool,
@@ -313,11 +322,34 @@ impl Default for Settings {
             hotkey_new_note: "ctrl+alt+n".into(),
             hotkey_clipboard_note: "ctrl+alt+v".into(),
             hotkey_toggle_notes: "ctrl+alt+h".into(),
+            hotkey_search: "ctrl+alt+f".into(),
+            category_looks: std::collections::BTreeMap::new(),
             start_with_windows: false,
             notes_shown: true,
             trash_days: 30,
             snap_to_edges: true,
             selection_strength: 35,
+        }
+    }
+}
+
+/// The category whose notes are templates: a new note can start as a copy
+/// of one.
+pub const TEMPLATES: &str = "Templates";
+
+impl Settings {
+    /// The look a new note gets in `category`: the category's own, else
+    /// its nearest parent's, else the default.
+    pub fn look_for(&self, category: &str) -> Look {
+        let mut path = category;
+        loop {
+            if let Some(look) = self.category_looks.get(path) {
+                return look.clone();
+            }
+            match path.rsplit_once('/') {
+                Some((parent, _)) => path = parent,
+                None => return self.default_look.clone(),
+            }
         }
     }
 }
@@ -341,6 +373,17 @@ mod tests {
         assert_eq!(index.notes[0].look.background, 255);
         assert_eq!(index.notes[0].look.body_size, Look::default().body_size);
         assert_eq!(index.settings, Settings::default());
+    }
+
+    #[test]
+    fn a_category_gives_new_notes_its_look_or_its_parents() {
+        let mut settings = Settings::default();
+        let blue = Look { background: 0x0000FF, ..Look::default() };
+        settings.category_looks.insert("Work".into(), blue.clone());
+        assert_eq!(settings.look_for("Work"), blue);
+        assert_eq!(settings.look_for("Work/Ideas/Later"), blue);
+        assert_eq!(settings.look_for("Home"), settings.default_look);
+        assert_eq!(settings.look_for(""), settings.default_look);
     }
 
     #[test]

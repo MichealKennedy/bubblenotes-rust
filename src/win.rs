@@ -20,6 +20,40 @@ pub fn primary_button_down() -> bool {
     unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 }
 }
 
+/// The program whose window is in front: its file name in lower case
+/// (`chrome.exe`). `None` when it's this app, or can't be told.
+#[cfg(target_os = "windows")]
+pub fn foreground_app() -> Option<String> {
+    use nsh_platform_windows::windows::Win32::Foundation::CloseHandle;
+    use nsh_platform_windows::windows::Win32::System::Threading::{
+        GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    };
+    use nsh_platform_windows::windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    use nsh_platform_windows::windows::core::PWSTR;
+    // SAFETY: queries about the foreground window's process; the buffer
+    // outlives the call that fills it, and the handle is closed.
+    unsafe {
+        let mut pid = 0;
+        GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut pid));
+        if pid == 0 || pid == GetCurrentProcessId() {
+            return None;
+        }
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut path = [0u16; 1024];
+        let mut len = path.len() as u32;
+        let read = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut len);
+        let _ = CloseHandle(process);
+        read.ok()?;
+        let path = String::from_utf16_lossy(&path[..len as usize]);
+        path.rsplit(['\\', '/']).next().map(str::to_lowercase).filter(|name| !name.is_empty())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn foreground_app() -> Option<String> {
+    None
+}
+
 /// Whether Ctrl and Alt are both held down.
 #[cfg(target_os = "windows")]
 pub fn ctrl_alt_down() -> bool {

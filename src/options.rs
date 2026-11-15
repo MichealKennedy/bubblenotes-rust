@@ -151,6 +151,7 @@ fn shortcuts_card(app: App) -> impl IntoElement {
             .child(shortcut("New note", |s| s.hotkey_new_note.clone(), |s, t| s.hotkey_new_note = t))
             .child(shortcut("New note from clipboard", |s| s.hotkey_clipboard_note.clone(), |s, t| s.hotkey_clipboard_note = t))
             .child(shortcut("Show or hide all notes", |s| s.hotkey_toggle_notes.clone(), |s, t| s.hotkey_toggle_notes = t))
+            .child(shortcut("Search notes", |s| s.hotkey_search.clone(), |s, t| s.hotkey_search = t))
             .child(view().py(px(6.0)).child(hint("Keys joined by +, such as ctrl+alt+n. Leave a field empty to turn its shortcut off."))),
     )
 }

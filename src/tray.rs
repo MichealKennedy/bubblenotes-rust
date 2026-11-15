@@ -25,9 +25,30 @@ pub fn install(app: App) {
             any_ghost.set(now);
         }
     });
+    // The templates (ids and titles), likewise set only when they change.
+    let templates = signal(Vec::<(String, String)>::new());
+    effect(move || {
+        let now: Vec<(String, String)> = app.templates().iter().map(|t| (t.id.to_string(), t.meta.with(|m| m.title.clone()))).collect();
+        if templates.with_untracked(|was| *was != now) {
+            templates.set(now);
+        }
+    });
     effect(move || {
         let shown = app.settings.with(|s| s.notes_shown);
         let ghosts = any_ghost.get();
+        let from_templates: Vec<MenuItem> = templates
+            .get()
+            .into_iter()
+            .map(|(id, title)| {
+                MenuItem::new(title).on_select(move || {
+                    if let Some(template) = app.note(&id) {
+                        let fresh = app.new_from_template(&template);
+                        app.command.set(Some((fresh.id.clone(), crate::app::NoteCommand::Focus)));
+                    }
+                })
+            })
+            .collect();
+        let no_templates = from_templates.is_empty();
         set_tray(
             tray()
                 .icon(ImageSrc::svg_markup(ICON_SVG))
@@ -38,6 +59,9 @@ pub fn install(app: App) {
                         let note = app.new_note("");
                         app.show_on_desktop(&note);
                     }),
+                    MenuItem::submenu("New from Template", from_templates).disabled(no_templates),
+                    MenuItem::new("Search Notes…").on_select(move || app.search_open.set(true)),
+                    MenuItem::separator(),
                     MenuItem::new("Show All").checked(shown).on_select(move || app.show_all()),
                     MenuItem::new("Hide All").on_select(move || app.update_settings(|s| s.notes_shown = false)),
                     MenuItem::new("Make Ghost Notes Solid").disabled(!ghosts).on_select(move || {

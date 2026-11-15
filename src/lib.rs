@@ -16,7 +16,8 @@
 //! - `note_menu`: a note's right-click menu
 //! - `config_panel`: "Edit configuration", beside a note
 //! - `manager`: the Notes Manager window
-//! - `tray`: the tray icon and its menu; `options`: the Options window
+//! - `tray`: the tray icon and its menu; `options`: the Options window;
+//!   `quick_search`: the search box a global shortcut opens
 //! - `alarms`: sleep and alarms; `system`: global shortcuts, start with Windows
 //! - `editor_view`: a note's text as an editor element; `media`: pasted images, YouTube cards
 //! - `kit`, `actions`, `toggle`, `slash`, `formats`, `ui`: the editor itself
@@ -47,6 +48,7 @@ mod model;
 mod note_menu;
 mod note_window;
 mod options;
+mod quick_search;
 mod slash;
 mod store;
 mod system;
@@ -75,6 +77,14 @@ pub fn BubbleNotes() -> impl IntoElement {
     system::install(app);
     effect(move || drag::set_snap(app.settings.with(|s| s.snap_to_edges)));
     effect(move || app.rescue_notes());
+    // The program in front, for the notes pinned to one.
+    let _ = set_interval(std::time::Duration::from_millis(400), move || {
+        if let Some(front) = win::foreground_app()
+            && app.foreground_app.with_untracked(|was| *was != front)
+        {
+            app.foreground_app.set(front);
+        }
+    });
     // Holding Ctrl+Alt makes ghost notes solid for the while.
     let _ = set_interval(std::time::Duration::from_millis(120), move || {
         let any = app.notes.with_untracked(|notes| notes.iter().any(|n| n.meta.with_untracked(|m| m.ghost)));
@@ -83,11 +93,12 @@ pub fn BubbleNotes() -> impl IntoElement {
             app.ghosts_solid.set(held);
         }
     });
-    // For development: BUBBLENOTES_OPEN=manager,options,config opens those
+    // For development: BUBBLENOTES_OPEN=manager,options,config,search opens those
     // windows at start.
     if let Ok(open) = std::env::var("BUBBLENOTES_OPEN") {
         app.manager_open.set(open.contains("manager"));
         app.options_open.set(open.contains("options"));
+        app.search_open.set(open.contains("search"));
         if open.contains("config") {
             app.config_for.set(app.notes.with_untracked(|n| n.first().map(|n| n.id.clone())));
         }
@@ -108,6 +119,15 @@ pub fn BubbleNotes() -> impl IntoElement {
                 }
                 "back" => app.command.set(Some((note.id.clone(), app::NoteCommand::SendToBack))),
                 "autosize" => app.command.set(Some((note.id.clone(), app::NoteCommand::AutoSize))),
+                // "newin:Work/Ideas": a new note in that category.
+                dev if dev.starts_with("newin:") => {
+                    app.new_note(&dev["newin:".len()..]);
+                }
+                // "template": a template from the first note, then a note from it.
+                "template" => {
+                    let template = app.save_as_template(&note);
+                    app.new_from_template(&template);
+                }
                 "unghost" => {
                     for note in app.notes.get_untracked() {
                         app.update(&note, |m| m.ghost = false);
@@ -145,5 +165,6 @@ pub fn BubbleNotes() -> impl IntoElement {
         .child(manager::manager_window(app))
         .child(config_panel::config_window(app))
         .child(options::options_window(app))
+        .child(quick_search::search_window(app))
         .child(note_menu::windows(app))
 }

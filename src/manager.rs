@@ -883,6 +883,15 @@ fn note_menu(m: Manager, note: &Note) {
             m.app.selected.set(Some(copy.id));
         })),
         MenuItem::submenu("Move to", moves),
+        if meta.category == crate::model::TEMPLATES {
+            MenuItem::new("New note from this template").on_select(with(|m, n| {
+                m.app.new_from_template(n);
+            }))
+        } else {
+            MenuItem::new("Save as template").on_select(with(|m, n| {
+                m.app.save_as_template(n);
+            }))
+        },
         MenuItem::separator(),
         MenuItem::new("Delete").on_select(with(|m, n| {
             m.app.trash(n);
@@ -916,8 +925,34 @@ fn confirm_delete_forever(app: App, note: &Note) {
 fn category_menu(m: Manager, path: &str) {
     let empty = untracked(|| notes_in(m.app, path).is_empty());
     let (here, sub, rename, delete) = (path.to_string(), path.to_string(), path.to_string(), path.to_string());
+    // The look new notes get here: a theme, or the default (its parent's).
+    let app = m.app;
+    let own = app.settings.with_untracked(|s| s.category_looks.get(path).cloned());
+    let mut looks = vec![
+        {
+            let path = path.to_string();
+            MenuItem::new("Default").checked(own.is_none()).on_select(move || {
+                app.update_settings(|s| {
+                    s.category_looks.remove(&path);
+                })
+            })
+        },
+        MenuItem::separator(),
+    ];
+    let themes = crate::model::builtin_themes().into_iter().chain(app.settings.with_untracked(|s| s.themes.clone()));
+    for theme in themes {
+        let path = path.to_string();
+        let checked = own.as_ref() == Some(&theme.look);
+        looks.push(MenuItem::new(theme.name.clone()).checked(checked).on_select(move || {
+            let look = theme.look.clone();
+            app.update_settings(|s| {
+                s.category_looks.insert(path.clone(), look);
+            })
+        }));
+    }
     let _ = popup_menu(vec![
         MenuItem::new("New note here").on_select(move || new_note(m, Some(here.clone()))),
+        MenuItem::submenu("Colour of new notes", looks),
         MenuItem::new("New category inside…").on_select(move || m.naming.set(Some(Naming::NewCategory(sub.clone())))),
         MenuItem::new("Rename category…").on_select(move || m.naming.set(Some(Naming::RenameCategory(rename.clone())))),
         MenuItem::separator(),
@@ -1100,7 +1135,7 @@ fn folded(text: &str) -> Vec<char> {
 }
 
 /// Where `query` first is in `text`, ignoring case, as a character index.
-fn find_folded(text: &str, query: &str) -> Option<usize> {
+pub(crate) fn find_folded(text: &str, query: &str) -> Option<usize> {
     let (text, query) = (folded(text), folded(query));
     if query.is_empty() || query.len() > text.len() {
         return None;
@@ -1110,7 +1145,7 @@ fn find_folded(text: &str, query: &str) -> Option<usize> {
 
 /// A short bit of `text` around the first match of `query`, on one line,
 /// with "…" where it was cut.
-fn snippet(text: &str, query: &str) -> Option<String> {
+pub(crate) fn snippet(text: &str, query: &str) -> Option<String> {
     let at = find_folded(text, query)?;
     let chars: Vec<char> = text.chars().collect();
     let start = at.saturating_sub(32);
@@ -1126,7 +1161,7 @@ fn snippet(text: &str, query: &str) -> Option<String> {
 }
 
 /// The start of a note's text, for a result found by its title.
-fn snippet_start(text: &str) -> String {
+pub(crate) fn snippet_start(text: &str) -> String {
     let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut short: String = line.chars().take(110).collect();
     if short.len() < line.len() {

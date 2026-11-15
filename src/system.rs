@@ -19,9 +19,10 @@ enum Hotkey {
     NewNote,
     ClipboardNote,
     ToggleNotes,
+    Search,
 }
 
-const HOTKEYS: [Hotkey; 3] = [Hotkey::NewNote, Hotkey::ClipboardNote, Hotkey::ToggleNotes];
+const HOTKEYS: [Hotkey; 4] = [Hotkey::NewNote, Hotkey::ClipboardNote, Hotkey::ToggleNotes, Hotkey::Search];
 
 impl Hotkey {
     /// Its keystroke in the settings ("" for none).
@@ -30,6 +31,7 @@ impl Hotkey {
             Hotkey::NewNote => &settings.hotkey_new_note,
             Hotkey::ClipboardNote => &settings.hotkey_clipboard_note,
             Hotkey::ToggleNotes => &settings.hotkey_toggle_notes,
+            Hotkey::Search => &settings.hotkey_search,
         }
     }
 
@@ -47,6 +49,7 @@ impl Hotkey {
                 });
             }),
             Hotkey::ToggleNotes => app.update_settings(|s| s.notes_shown = !s.notes_shown),
+            Hotkey::Search => app.search_open.update(|open| *open = !*open),
         }
     }
 }
@@ -68,9 +71,9 @@ pub fn install(app: App) {
 }
 
 fn install_hotkeys(app: App) {
-    let registered: Stored<[String; 3]> = stored(Default::default());
+    let registered: Stored<[String; 4]> = stored(Default::default());
     effect(move || {
-        let wanted: [String; 3] = app.settings.with(|s| HOTKEYS.map(|h| h.keystroke(s).trim().to_string()));
+        let wanted: [String; 4] = app.settings.with(|s| HOTKEYS.map(|h| h.keystroke(s).trim().to_string()));
         let before = registered.get();
         if wanted == before {
             return;
