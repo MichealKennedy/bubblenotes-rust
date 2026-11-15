@@ -37,28 +37,103 @@ const LEAVE_GRACE: Duration = Duration::from_millis(250);
 
 // ----- Geometry ----------------------------------------------------------------------
 
-/// Where the bubble and the note sit inside the open window, and its size.
+/// Where the bubble and the note sit inside the open window, its size, and
+/// the side the note is on.
 #[derive(Debug, PartialEq)]
 struct Layout {
     bubble: (f32, f32),
+    note: (f32, f32),
     w: f32,
     h: f32,
+    side: BubbleDirection,
 }
 
-/// The open window's layout for a bubble of `size` and a note of `w` x `h`.
-fn layout(direction: BubbleDirection, size: f32, w: f32, h: f32) -> Layout {
-    match direction {
-        BubbleDirection::Bottom => Layout { bubble: (0.0, 0.0), w: w.max(size), h: size + GAP + h },
-        BubbleDirection::Top => Layout { bubble: (0.0, h + GAP), w: w.max(size), h: size + GAP + h },
-        BubbleDirection::Right => Layout { bubble: (0.0, 0.0), w: size + GAP + w, h: h.max(size) },
-        BubbleDirection::Left => Layout { bubble: (w + GAP, 0.0), w: size + GAP + w, h: h.max(size) },
-        BubbleDirection::OnTop => Layout { bubble: ((w - size) / 2.0, (h - size) / 2.0), w, h },
+/// The work area a bubble at `at` of `size` is on: the one holding its
+/// middle, else the nearest.
+fn area_of(at: (f32, f32), size: f32, areas: &[Rect]) -> Option<Rect> {
+    let (cx, cy) = (at.0 + size / 2.0, at.1 + size / 2.0);
+    let distance = |a: &Rect| {
+        let dx = (a.x - cx).max(cx - (a.x + a.w)).max(0.0);
+        let dy = (a.y - cy).max(cy - (a.y + a.h)).max(0.0);
+        dx * dx + dy * dy
+    };
+    areas.iter().min_by(|a, b| distance(a).total_cmp(&distance(b))).copied()
+}
+
+/// The open window's layout for a bubble of `size` at `at` on the screen
+/// and a note of `w` x `h`, opening to `direction`.
+///
+/// The note stays on the screen (`areas` are the displays' work areas; with
+/// none, nothing is known and it opens as asked): where it doesn't fit on
+/// its side and the opposite side has more room, it opens there; and it
+/// slides along the bubble rather than run past the screen's edge.
+fn layout(direction: BubbleDirection, size: f32, w: f32, h: f32, at: (f32, f32), areas: &[Rect]) -> Layout {
+    use BubbleDirection::*;
+    let area = area_of(at, size, areas);
+    let side = match (direction, area) {
+        (OnTop, _) | (_, None) => direction,
+        (_, Some(a)) => {
+            let above = at.1 - a.y - GAP;
+            let below = a.y + a.h - (at.1 + size) - GAP;
+            let before = at.0 - a.x - GAP;
+            let after = a.x + a.w - (at.0 + size) - GAP;
+            match direction {
+                Top if h > above && below > above => Bottom,
+                Bottom if h > below && above > below => Top,
+                Left if w > before && after > before => Right,
+                Right if w > after && before > after => Left,
+                d => d,
+            }
+        }
+    };
+    let mut l = match side {
+        Bottom => Layout { bubble: (0.0, 0.0), note: (0.0, size + GAP), w: w.max(size), h: size + GAP + h, side },
+        Top => Layout { bubble: (0.0, h + GAP), note: (0.0, 0.0), w: w.max(size), h: size + GAP + h, side },
+        Right => Layout { bubble: (0.0, 0.0), note: (size + GAP, 0.0), w: size + GAP + w, h: h.max(size), side },
+        Left => Layout { bubble: (w + GAP, 0.0), note: (0.0, 0.0), w: size + GAP + w, h: h.max(size), side },
+        OnTop => Layout { bubble: ((w - size) / 2.0, (h - size) / 2.0), note: (0.0, 0.0), w, h, side },
+    };
+    if let Some(a) = area {
+        // Where the bubble is in the window (instead of at `offset`) for
+        // the window to lie inside the area, as far as the bubble allows.
+        let slide = |pos: f32, offset: f32, extent: f32, start: f32, room: f32| {
+            let origin = (pos - offset).min(start + room - extent).max(start);
+            (pos - origin).clamp(0.0, (extent - size).max(0.0))
+        };
+        if matches!(side, Bottom | Top | OnTop) {
+            l.bubble.0 = slide(at.0, l.bubble.0, l.w, a.x, a.w);
+        }
+        if matches!(side, Right | Left | OnTop) {
+            l.bubble.1 = slide(at.1, l.bubble.1, l.h, a.y, a.h);
+        }
     }
+    l
+}
+
+thread_local! {
+    /// The work areas the tests place bubbles in (none: as asked).
+    #[cfg(test)]
+    static TEST_AREAS: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The displays' work areas.
+fn areas() -> Vec<Rect> {
+    #[cfg(test)]
+    return TEST_AREAS.with(|a| a.borrow().clone());
+    #[cfg(not(test))]
+    drag::work_areas()
 }
 
 /// The note's size as it shows: only its title when rolled up.
 fn note_size(meta: &NoteMeta) -> (f32, f32) {
     (meta.rect.w, if meta.rolled_up { TITLE_HEIGHT } else { meta.rect.h })
+}
+
+/// The open window's layout for the note as it is now.
+fn layout_of(meta: &NoteMeta) -> Layout {
+    let b = &meta.bubble;
+    let (w, h) = note_size(meta);
+    layout(b.direction, b.size, w, h, (b.x, b.y), &areas())
 }
 
 /// The window of a note shown as a bubble: the bubble alone, or the bubble
@@ -68,8 +143,7 @@ pub fn window_rect(meta: &NoteMeta, open: bool) -> Rect {
     if !open {
         return Rect { x: b.x, y: b.y, w: b.size, h: b.size };
     }
-    let (w, h) = note_size(meta);
-    let l = layout(b.direction, b.size, w, h);
+    let l = layout_of(meta);
     Rect { x: b.x - l.bubble.0, y: b.y - l.bubble.1, w: l.w, h: l.h }
 }
 
@@ -81,25 +155,28 @@ pub fn window_moved(meta: &mut NoteMeta, open: bool, now: Rect) {
         return;
     }
     let expected = window_rect(meta, true);
-    let (size, direction) = (meta.bubble.size, meta.bubble.direction);
+    let before = layout_of(meta);
+    let size = meta.bubble.size;
     // What a resize gave the note: the window less the bubble's part.
-    let (w, h) = match direction {
+    let (w, h) = match before.side {
         BubbleDirection::Bottom | BubbleDirection::Top => (now.w, now.h - size - GAP),
         BubbleDirection::Right | BubbleDirection::Left => (now.w - size - GAP, now.h),
         BubbleDirection::OnTop => (now.w, now.h),
     };
+    let resized = (now.w - expected.w).abs() > 0.5 || (now.h - expected.h).abs() > 0.5;
     if (now.w - expected.w).abs() > 0.5 {
         meta.rect.w = w.max(MIN_WIDTH);
     }
     if (now.h - expected.h).abs() > 0.5 && !meta.rolled_up {
         meta.rect.h = h.max(MIN_HEIGHT);
     }
-    // The window's corner stayed put (a move, or the grip at the bottom
-    // right): the bubble is where the layout puts it from there.
-    let (w, h) = note_size(meta);
-    let l = layout(direction, size, w, h);
-    meta.bubble.x = now.x + l.bubble.0;
-    meta.bubble.y = now.y + l.bubble.1;
+    // The bubble is where it was in the window: a move carries it along,
+    // and the grip (at the bottom right) leaves the window's corner, and
+    // so the bubble, where it was. Only a resize that grows the part the
+    // bubble sits after (a note above or to the left of it) moves it.
+    let at = if resized { layout_of(meta).bubble } else { before.bubble };
+    meta.bubble.x = now.x + at.0;
+    meta.bubble.y = now.y + at.1;
 }
 
 // ----- Drawing -----------------------------------------------------------------------
@@ -376,12 +453,22 @@ fn set_open(app: App, live: Live, open: Signal<bool>, meta: Signal<NoteMeta>, wa
     });
 }
 
+/// Whether the pointer is over `window` (false when that can't be told).
+fn pointer_over(window: &nsh_core::element::desktop::WindowRef) -> bool {
+    let (Some(state), Some((x, y))) = (untracked(|| window.state()), win::cursor()) else { return false };
+    let scale = state.scale_factor.max(0.1);
+    let (x, y, b) = (x / scale, y / scale, state.bounds);
+    x >= b.origin.x.0 && x < b.origin.x.0 + b.size.width.0 && y >= b.origin.y.0 && y < b.origin.y.0 + b.size.height.0
+}
+
 /// Shuts the note after the grace delay, unless the pointer came back.
-fn close_after_leave(app: App, live: Live, open: Signal<bool>, meta: Signal<NoteMeta>) {
+fn close_after_leave(app: App, live: Live, open: Signal<bool>, meta: Signal<NoteMeta>, window: nsh_core::element::desktop::WindowRef) {
     app.owner.run(|| {
         let _ = spawn(async move {
             timer(LEAVE_GRACE).await;
-            if !live.inside.get_untracked() && !win::primary_button_down() {
+            // The window moving or growing under a still pointer can look
+            // like the pointer leaving: where the pointer really is decides.
+            if !live.inside.get_untracked() && !win::primary_button_down() && !pointer_over(&window) {
                 set_open(app, live, open, meta, false);
             }
         });
@@ -401,11 +488,14 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
         live.phase.set(1.0);
     }
     let window = current_window();
-    let direction = meta.with_untracked(|m| m.bubble.direction);
+    let leave_window = window.clone();
+    // Where things are in the open window, as the note is now.
+    let placed = move || meta.with(layout_of);
     // On top of the bubble the note hides it, so only leaving shuts it.
     let closes_on_leave = move || meta.with_untracked(|m| m.bubble.close_on_leave || m.bubble.direction == BubbleDirection::OnTop);
 
     let menu_note = note.clone();
+    let drag_note = note.clone();
     let drag_id = note.id.clone();
     let badge_note = stored(note.clone());
     let badge = move || {
@@ -417,7 +507,10 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
     };
     let bubble = bubble_shape(meta, badge)
         .cursor(Cursor::Default)
-        .style_when(move || open.get() && direction == BubbleDirection::OnTop, |s| s.hidden())
+        .absolute()
+        .left(move || px(if open.get() { placed().bubble.0 } else { 0.0 }))
+        .top(move || px(if open.get() { placed().bubble.1 } else { 0.0 }))
+        .style_when(move || open.get() && meta.with(|m| m.bubble.direction == BubbleDirection::OnTop), |s| s.hidden())
         .on_press_down(move || {
             // A right press opens the menu instead (and must not toggle).
             if !win::primary_button_down() {
@@ -430,15 +523,29 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
             });
             let id = drag_id.clone();
             drag::set_neighbours(app.other_note_windows(&id));
+            let to = stored(None::<(f32, f32)>);
+            let dragged = drag_note.clone();
             drag::drag_window(
                 app.owner,
                 window.clone(),
-                move |x, y| app.dragging.set(Some((id.clone(), x + offset_x, y + offset_y))),
+                move |x, y| {
+                    to.replace(Some((x, y)));
+                    app.dragging.set(Some((id.clone(), x + offset_x, y + offset_y)));
+                },
                 move |moved| {
                     app.dragging.set(None);
                     // A press that didn't move is a click.
                     if !moved {
                         set_open(app, live, open, meta, !live.goal.get_untracked());
+                    } else if let Some((x, y)) = to.get() {
+                        // The note learns where it is now at once: the
+                        // window's own report comes late, and opening or
+                        // shutting before it would put the bubble back.
+                        let is_open = open.get_untracked();
+                        app.update(&dragged, |m| {
+                            let r = window_rect(m, is_open);
+                            window_moved(m, is_open, Rect { x, y, ..r });
+                        });
                     }
                 },
             );
@@ -471,31 +578,47 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
             size.set(now);
         }
     });
-    let (w, h) = (move || size.get().0, move || size.get().1);
+    // The part of the note that shows, in the window: (x, y, w, h), and
+    // where the whole note is inside that part. It rolls out from the
+    // bubble's side; over the bubble it grows from the middle.
+    let shown = move || {
+        let (l, (w, h), p) = (placed(), size.get(), live.phase.get());
+        let (x, y) = l.note;
+        match l.side {
+            BubbleDirection::Bottom => ((x, y, w, h * p), (0.0, 0.0)),
+            BubbleDirection::Top => ((x, y + h * (1.0 - p), w, h * p), (0.0, -h * (1.0 - p))),
+            BubbleDirection::Right => ((x, y, w * p, h), (0.0, 0.0)),
+            BubbleDirection::Left => ((x + w * (1.0 - p), y, w * p, h), (-w * (1.0 - p), 0.0)),
+            BubbleDirection::OnTop => {
+                let k = 0.25 + 0.75 * p;
+                ((x + w * (1.0 - k) / 2.0, y + h * (1.0 - k) / 2.0, w * k, h * k), (-w * (1.0 - k) / 2.0, -h * (1.0 - k) / 2.0))
+            }
+        }
+    };
     let note_part = move || {
         let card = card.clone();
         dynamic(move || {
             open.get().then(|| {
-                let rolled = move |full: f32| px(full * live.phase.get());
-                let holder = view().flex_shrink_0().overflow_hidden();
-                let holder = match direction {
-                    BubbleDirection::Bottom => holder.w(move || px(w())).h(move || rolled(h())),
-                    BubbleDirection::Top => holder.w(move || px(w())).h(move || rolled(h())).justify_end(),
-                    BubbleDirection::Right => holder.h(move || px(h())).w(move || rolled(w())),
-                    BubbleDirection::Left => holder.h(move || px(h())).w(move || rolled(w())).items_end(),
-                    // Over the bubble it grows from the middle.
-                    BubbleDirection::OnTop => holder
-                        .items_center()
-                        .justify_center()
-                        .w(move || px(w() * (0.25 + 0.75 * live.phase.get())))
-                        .h(move || px(h() * (0.25 + 0.75 * live.phase.get())))
-                        .opacity(move || live.phase.get()),
-                };
-                holder.child(view().w(move || px(w())).h(move || px(h())).flex_shrink_0().child(untracked(|| card())))
+                view()
+                    .absolute()
+                    .overflow_hidden()
+                    .left(move || px(shown().0.0))
+                    .top(move || px(shown().0.1))
+                    .w(move || px(shown().0.2))
+                    .h(move || px(shown().0.3))
+                    .opacity(move || if placed().side == BubbleDirection::OnTop { live.phase.get() } else { 1.0 })
+                    .child(
+                        view()
+                            .absolute()
+                            .left(move || px(shown().1.0))
+                            .top(move || px(shown().1.1))
+                            .w(move || px(size.get().0))
+                            .h(move || px(size.get().1))
+                            .child(untracked(|| card())),
+                    )
             })
         })
     };
-    let gap = move || view().flex_shrink_0().w(px(GAP)).h(px(GAP)).style_when(move || !open.get(), |s| s.hidden());
 
     let root = view()
         .flex_1()
@@ -509,16 +632,10 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
         .on_mouse_leave(move |_: &MouseEvent| {
             live.inside.set(false);
             if live.goal.get_untracked() && closes_on_leave() {
-                close_after_leave(app, live, open, meta);
+                close_after_leave(app, live, open, meta, leave_window.clone());
             }
         });
-    match direction {
-        BubbleDirection::Bottom => root.items_start().child(bubble).child(gap()).child(note_part()),
-        BubbleDirection::Top => root.items_start().justify_end().child(note_part()).child(gap()).child(bubble),
-        BubbleDirection::Right => root.flex_row().items_start().child(bubble).child(gap()).child(note_part()),
-        BubbleDirection::Left => root.flex_row().items_start().justify_end().child(note_part()).child(gap()).child(bubble),
-        BubbleDirection::OnTop => root.items_center().justify_center().child(bubble).child(note_part()),
-    }
+    root.child(bubble).child(note_part())
 }
 
 #[cfg(test)]
@@ -571,7 +688,7 @@ mod tests {
                 let m = meta(direction, rolled_up);
                 let r = window_rect(&m, true);
                 let (w, h) = note_size(&m);
-                let l = layout(direction, 64.0, w, h);
+                let l = layout(direction, 64.0, w, h, (500.0, 400.0), &[]);
                 assert_eq!((r.x + l.bubble.0, r.y + l.bubble.1), (500.0, 400.0), "{direction:?}");
                 // And the window holds the bubble.
                 assert!(l.bubble.0 >= 0.0 && l.bubble.0 + 64.0 <= r.w + 0.01, "{direction:?}");
@@ -637,6 +754,48 @@ mod tests {
         let r = window_rect(&before, true);
         window_moved(&mut after, true, Rect { h: r.h + 50.0, ..r });
         assert_eq!(after.rect.h, 200.0);
+    }
+
+    const SCREEN: Rect = Rect { x: 0.0, y: 0.0, w: 1000.0, h: 800.0 };
+
+    #[test]
+    fn a_note_with_no_room_on_its_side_opens_on_the_other() {
+        use BubbleDirection::*;
+        let side = |d, at| layout(d, 64.0, 240.0, 200.0, at, &[SCREEN]).side;
+        // Near the top: no room above.
+        assert_eq!(side(Top, (500.0, 100.0)), Bottom);
+        assert_eq!(side(Top, (500.0, 400.0)), Top);
+        // Near the bottom, the left and the right.
+        assert_eq!(side(Bottom, (500.0, 700.0)), Top);
+        assert_eq!(side(Left, (100.0, 400.0)), Right);
+        assert_eq!(side(Right, (900.0, 400.0)), Left);
+        assert_eq!(side(Right, (500.0, 400.0)), Right);
+    }
+
+    #[test]
+    fn an_open_note_stays_on_the_screen() {
+        for direction in DIRECTIONS {
+            for at in [(20.0, 20.0), (920.0, 20.0), (20.0, 720.0), (920.0, 720.0), (500.0, 400.0)] {
+                let l = layout(direction, 64.0, 240.0, 200.0, at, &[SCREEN]);
+                let (x, y) = (at.0 - l.bubble.0, at.1 - l.bubble.1);
+                assert!(x >= 0.0 && y >= 0.0 && x + l.w <= 1000.0 && y + l.h <= 800.0, "{direction:?} at {at:?}: {x},{y} {}x{}", l.w, l.h);
+                // The bubble is in the window.
+                assert!(l.bubble.0 >= 0.0 && l.bubble.1 >= 0.0 && l.bubble.0 + 64.0 <= l.w + 0.01 && l.bubble.1 + 64.0 <= l.h + 0.01, "{direction:?} at {at:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn moving_and_reporting_agree_near_an_edge() {
+        TEST_AREAS.with(|a| *a.borrow_mut() = vec![SCREEN]);
+        for direction in DIRECTIONS {
+            let mut before = meta(direction, false);
+            (before.bubble.x, before.bubble.y) = (930.0, 30.0);
+            let mut after = before.clone();
+            window_moved(&mut after, true, window_rect(&before, true));
+            assert_eq!(after, before, "{direction:?}");
+        }
+        TEST_AREAS.with(|a| a.borrow_mut().clear());
     }
 
     #[test]

@@ -87,14 +87,43 @@ fn attributes() -> WindowAttributes {
     a
 }
 
+/// Where the panel goes for a note whose window is `anchor`, and its size:
+/// (x, y, width, height).
+fn frame_beside(anchor: Rect) -> (f32, f32, f32, f32) {
+    let areas = work_areas();
+    let tallest = areas.iter().map(|a| a.h).fold(0.0, f32::max);
+    let h = if tallest > 0.0 { PANEL_HEIGHT.min(tallest - 2.0 * GAP) } else { PANEL_HEIGHT };
+    let (x, y) = place(anchor, &areas, PANEL_WIDTH, h);
+    (x, y, PANEL_WIDTH, h)
+}
+
 /// The panel's window, open while a note is being configured
 /// (`App::config_for`).
 pub fn config_window(app: App) -> impl IntoElement {
+    // The note it's for, set only when that changes.
+    let target = signal(None::<Rc<str>>);
+    effect(move || {
+        let now = app.config_for.get();
+        if target.with_untracked(|t| *t != now) {
+            target.set(now);
+        }
+    });
+    // The window is made for each note it opens for, already in its place
+    // beside the note: a window can only be told where to open when it's
+    // made, and one opened elsewhere and then moved shows there for a moment.
+    dynamic(move || {
+        let note = target.get().and_then(|id| untracked(|| app.note(&id)))?;
+        let (x, y, w, h) = untracked(|| frame_beside(note.meta.with(|m| shape_rect(m, false))));
+        Some(config_window_at(app, x, y, w, h))
+    })
+}
+
+fn config_window_at(app: App, x: f32, y: f32, w: f32, h: f32) -> impl IntoElement {
     window()
         .id("config")
         .title("Edit configuration")
-        .default_size(size(px(PANEL_WIDTH), px(PANEL_HEIGHT)))
-        .default_position(WindowPosition::At(point(px(200.0), px(120.0))))
+        .default_size(size(px(w), px(h)))
+        .default_position(WindowPosition::At(point(px(x), px(y))))
         .attributes(attributes())
         .open(move || app.config_for.get().is_some())
         .on_open_change(move |c: &OpenChange| {
@@ -105,12 +134,10 @@ pub fn config_window(app: App) -> impl IntoElement {
         .content(move || {
             let window = current_window();
             // Beside the note, wherever it goes.
-            let last = stored(None::<WindowFrame>);
+            let opened = WindowFrame { x: Some(px(x)), y: Some(px(y)), width: Some(px(w)), height: Some(px(h)), animated: None };
+            let last = stored(Some(opened));
             effect(move || {
-                // Bounds asked of a window that isn't up yet are lost: this
-                // runs again once it is.
                 if window.state().is_none() {
-                    last.replace(None);
                     return;
                 }
                 let Some(note) = app.config_for.get().and_then(|id| app.note(&id)) else { return };
@@ -121,11 +148,8 @@ pub fn config_window(app: App) -> impl IntoElement {
                     anchor.x = x;
                     anchor.y = y;
                 }
-                let areas = work_areas();
-                let tallest = areas.iter().map(|a| a.h).fold(0.0, f32::max);
-                let h = if tallest > 0.0 { PANEL_HEIGHT.min(tallest - 2.0 * GAP) } else { PANEL_HEIGHT };
-                let (x, y) = place(anchor, &areas, PANEL_WIDTH, h);
-                let frame = WindowFrame { x: Some(px(x)), y: Some(px(y)), width: Some(px(PANEL_WIDTH)), height: Some(px(h)), animated: None };
+                let (x, y, w, h) = frame_beside(anchor);
+                let frame = WindowFrame { x: Some(px(x)), y: Some(px(y)), width: Some(px(w)), height: Some(px(h)), animated: None };
                 if last.get() != Some(frame.clone()) {
                     last.replace(Some(frame.clone()));
                     window.set_bounds(frame);

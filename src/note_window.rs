@@ -142,22 +142,40 @@ pub fn note_window(app: App, note: Note) -> Window {
             let note_moved = note.clone();
             window.on_bounds_change(move |b| {
                 let now = Rect { x: b.origin.x.0, y: b.origin.y.0, w: b.size.width.0, h: b.size.height.0 };
-                if last.get() == now {
-                    return;
-                }
-                last.replace(now);
-                app.update(&note_moved, |m| {
-                    if m.bubble.enabled {
-                        bubble::window_moved(m, bubble_open.get_untracked(), now);
-                    } else {
+                // The report comes a moment after the change, and rounded to
+                // whole pixels. So a window the app itself shaped (in any of
+                // the note's shapes: by now it may have another) is told by
+                // being about where the app put it, and is not the user's
+                // doing: taking it for a move would drag the note a little
+                // each time, or far when the shape has changed since.
+                let about = |a: f32, b: f32| (a - b).abs() <= 1.0;
+                let near = |r: Rect| about(now.x, r.x) && about(now.y, r.y) && about(now.w, r.w) && about(now.h, r.h);
+                let m = meta.get_untracked();
+                if m.bubble.enabled {
+                    let (shut, open) = (bubble::window_rect(&m, false), bubble::window_rect(&m, true));
+                    if near(shut) || near(open) {
+                        return;
+                    }
+                    // Which of the two the user moved shows in its size (a
+                    // resized one is the open one).
+                    let is_open = !(about(now.w, shut.w) && about(now.h, shut.h));
+                    last.replace(now);
+                    app.update(&note_moved, |m| bubble::window_moved(m, is_open, now));
+                } else {
+                    if near(m.rect) || near(Rect { h: TITLE_HEIGHT, ..m.rect }) {
+                        return;
+                    }
+                    let rolled = about(now.h, TITLE_HEIGHT);
+                    last.replace(now);
+                    app.update(&note_moved, |m| {
                         m.rect.x = now.x;
                         m.rect.y = now.y;
                         m.rect.w = now.w.max(MIN_WIDTH);
-                        if !m.rolled_up {
+                        if !rolled {
                             m.rect.h = now.h.max(MIN_HEIGHT);
                         }
-                    }
-                });
+                    });
+                }
             });
 
             // A ghost note lets clicks through (unless Ctrl+Alt is held).

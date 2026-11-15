@@ -39,7 +39,7 @@ impl Format {
     pub fn parse(self, schema: &Schema, text: &str) -> Result<Node, String> {
         match self {
             Format::Markdown => markdown().parse(schema, text).map_err(|e| e.to_string()),
-            Format::Html => HtmlFormat::default().parse(schema, html_body(text)).map_err(|e| e.to_string()),
+            Format::Html => HtmlFormat::default().parse(schema, html_body(text)).map(|doc| spaces(&doc, false)).map_err(|e| e.to_string()),
             Format::Text => PlainTextFormat::default().parse(schema, text).map_err(|e| e.to_string()),
         }
     }
@@ -52,7 +52,7 @@ impl Format {
                 .serialize(&cards_as_links(doc))
                 .map(|s| format!("{}\n", s.trim_end().replace(LINK_OPEN, "[[").replace(LINK_CLOSE, "]]")))
                 .map_err(|e| e.to_string()),
-            Format::Html => HtmlFormat::default().serialize(doc).map(html_page).map_err(|e| e.to_string()),
+            Format::Html => HtmlFormat::default().serialize(&spaces(doc, true)).map(html_page).map_err(|e| e.to_string()),
             Format::Text => PlainTextFormat::default().serialize(doc).map_err(|e| e.to_string()),
         }
     }
@@ -61,7 +61,89 @@ impl Format {
 /// The document as HTML without a page around it: what a note's file holds
 /// inside its `<body>`, and what goes on the clipboard.
 pub fn html_fragment(doc: &Node) -> Result<String, String> {
-    HtmlFormat::default().serialize(doc).map(|html| with_image_widths(&html, doc)).map_err(|e| e.to_string())
+    HtmlFormat::default().serialize(&spaces(doc, true)).map(|html| with_image_widths(&html, doc)).map_err(|e| e.to_string())
+}
+
+/// A no-break space: what HTML keeps where it would drop a space.
+const HARD_SPACE: char = '\u{a0}';
+
+/// `doc` with its spaces as HTML needs them to survive (`hard`), or as the
+/// editor has them (not `hard`).
+///
+/// HTML reads a run of spaces as one, and none at the start or end of a
+/// block. So, as browsers do for editable text, a space HTML would drop is
+/// written as a no-break space (the first of a block, the last, and every
+/// second one of a run), and reading turns no-break spaces back into
+/// spaces. Code keeps its spaces in HTML as it is, and is left alone.
+fn spaces(doc: &Node, hard: bool) -> Node {
+    fn is_code(text: &Value) -> bool {
+        text.get("marks").and_then(Value::as_array).is_some_and(|marks| marks.iter().any(|m| m.get("type").and_then(Value::as_str) == Some("code")))
+    }
+    fn walk(value: &mut Value, hard: bool) {
+        if value.get("type").and_then(Value::as_str) == Some("codeBlock") {
+            return;
+        }
+        let Some(children) = value.get_mut("content").and_then(Value::as_array_mut) else { return };
+        // Whether a space here would be dropped: at the block's start, after
+        // a line break, after a space.
+        let mut dropped = true;
+        // The text a space at whose end would be dropped: the last before a
+        // line break or the block's end.
+        let mut last_text = None;
+        let end_hard = |children: &mut Vec<Value>, at: Option<usize>| {
+            if let Some(i) = at
+                && let Some(kept) = children[i].get("text").and_then(Value::as_str).and_then(|t| t.strip_suffix(' '))
+            {
+                children[i]["text"] = Value::String(format!("{kept}{HARD_SPACE}"));
+            }
+        };
+        for i in 0..children.len() {
+            let kind = children[i].get("type").and_then(Value::as_str).unwrap_or_default().to_string();
+            if kind != "text" {
+                walk(&mut children[i], hard);
+                dropped = kind == "hardBreak";
+                if dropped && hard {
+                    end_hard(children, last_text);
+                }
+                last_text = None;
+                continue;
+            }
+            if is_code(&children[i]) {
+                dropped = false;
+                last_text = None;
+                continue;
+            }
+            let Some(text) = children[i].get("text").and_then(Value::as_str) else { continue };
+            let out: String = if hard {
+                text.chars()
+                    .map(|c| {
+                        let c = if c == ' ' && dropped { HARD_SPACE } else { c };
+                        dropped = c == ' ';
+                        c
+                    })
+                    .collect()
+            } else {
+                text.replace(HARD_SPACE, " ")
+            };
+            children[i]["text"] = Value::String(out);
+            last_text = Some(i);
+        }
+        if hard {
+            end_hard(children, last_text);
+        }
+    }
+    let from = if hard { ' ' } else { HARD_SPACE };
+    let mut found = false;
+    doc.descendants(&mut |node, _, _, _| {
+        found |= node.text().is_some_and(|t| t.contains(from));
+        !found
+    });
+    if !found {
+        return doc.clone();
+    }
+    let mut json = doc.to_json();
+    walk(&mut json, hard);
+    doc.ty().schema().node_from_json(&json).unwrap_or_else(|_| doc.clone())
 }
 
 /// `html` with each image's width written on its `<img>`. NSH's editor
@@ -423,5 +505,31 @@ mod tests {
         let a = Format::Markdown.parse(&schema, "Hello\n").unwrap();
         let b = Format::Html.parse(&schema, "<p>Hello</p><p></p>").unwrap();
         assert!(same_content(&a, &b));
+    }
+
+    #[test]
+    fn spaces_survive_being_saved_as_html() {
+        let schema = schema();
+        let doc = schema
+            .node_from_json(&serde_json::json!({
+                "type": "doc",
+                "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": " two  three   end " }] },
+                    { "type": "paragraph", "content": [
+                        { "type": "text", "text": "bold ", "marks": [{ "type": "bold" }] },
+                        { "type": "text", "text": " plain" },
+                    ] },
+                    { "type": "codeBlock", "content": [{ "type": "text", "text": "a  b" }] },
+                ],
+            }))
+            .unwrap();
+        let html = html_fragment(&doc).unwrap();
+        // No two spaces in a row, none at a paragraph's start or end.
+        assert!(!html.contains("  <") && !html.contains("> ") && !html.contains(" </p>"), "{html}");
+        assert!(html.contains("a  b"), "code keeps its spaces: {html}");
+        let back = Format::Html.parse(&schema, &html).unwrap();
+        assert_eq!(back.child(0).text_content(), " two  three   end ");
+        assert_eq!(back.child(1).text_content(), "bold  plain");
+        assert_eq!(back.child(2).text_content(), "a  b");
     }
 }

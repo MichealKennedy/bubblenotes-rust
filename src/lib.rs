@@ -118,6 +118,8 @@ pub fn BubbleNotes() -> impl IntoElement {
                     note.editor.run("insertContent", serde_json::json!({ "content": "/" }));
                 }
                 "back" => app.command.set(Some((note.id.clone(), app::NoteCommand::SendToBack))),
+                // "config": the note's configuration panel, as its menu opens it.
+                "config" => app.config_for.set(Some(note.id.clone())),
                 "autosize" => app.command.set(Some((note.id.clone(), app::NoteCommand::AutoSize))),
                 // "newin:Work/Ideas": a new note in that category.
                 dev if dev.starts_with("newin:") => {
