@@ -461,27 +461,37 @@ pub fn bubble_view(app: App, note: Note, open: Signal<bool>, card: impl Fn() -> 
 
     // The note, rolled out of the bubble by `phase` along its side.
     let card = Rc::new(card);
+    // The note's size, set only when it changes: the note changes on every
+    // save, and nothing here may be made again for that (the text would
+    // lose the keyboard focus).
+    let size = signal(meta.with_untracked(note_size));
+    effect(move || {
+        let now = meta.with(note_size);
+        if size.get_untracked() != now {
+            size.set(now);
+        }
+    });
+    let (w, h) = (move || size.get().0, move || size.get().1);
     let note_part = move || {
         let card = card.clone();
         dynamic(move || {
             open.get().then(|| {
-                let (w, h) = meta.with(note_size);
                 let rolled = move |full: f32| px(full * live.phase.get());
                 let holder = view().flex_shrink_0().overflow_hidden();
                 let holder = match direction {
-                    BubbleDirection::Bottom => holder.w(px(w)).h(move || rolled(h)),
-                    BubbleDirection::Top => holder.w(px(w)).h(move || rolled(h)).justify_end(),
-                    BubbleDirection::Right => holder.h(px(h)).w(move || rolled(w)),
-                    BubbleDirection::Left => holder.h(px(h)).w(move || rolled(w)).items_end(),
+                    BubbleDirection::Bottom => holder.w(move || px(w())).h(move || rolled(h())),
+                    BubbleDirection::Top => holder.w(move || px(w())).h(move || rolled(h())).justify_end(),
+                    BubbleDirection::Right => holder.h(move || px(h())).w(move || rolled(w())),
+                    BubbleDirection::Left => holder.h(move || px(h())).w(move || rolled(w())).items_end(),
                     // Over the bubble it grows from the middle.
                     BubbleDirection::OnTop => holder
                         .items_center()
                         .justify_center()
-                        .w(move || px(w * (0.25 + 0.75 * live.phase.get())))
-                        .h(move || px(h * (0.25 + 0.75 * live.phase.get())))
+                        .w(move || px(w() * (0.25 + 0.75 * live.phase.get())))
+                        .h(move || px(h() * (0.25 + 0.75 * live.phase.get())))
                         .opacity(move || live.phase.get()),
                 };
-                holder.child(view().w(px(w)).h(px(h)).flex_shrink_0().child(card()))
+                holder.child(view().w(move || px(w())).h(move || px(h())).flex_shrink_0().child(untracked(|| card())))
             })
         })
     };

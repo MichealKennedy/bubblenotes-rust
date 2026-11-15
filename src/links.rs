@@ -310,7 +310,7 @@ pub fn menu(ctx: Ctx, app: App, window_height: Signal<f32>) -> impl IntoElement 
                     }
                     pointer.replace(Some(at));
                 })
-                .on_press(move || pick(picked.clone()))
+                .cursor(Cursor::Pointer).on_press(move || pick(picked.clone()))
                 .child(text(label).flex_1().truncate().text_size(px(13.0)))
                 .child(text(hint).truncate().text_size(px(11.0)).text_color(move || theme().muted_foreground))
                 .into_element()

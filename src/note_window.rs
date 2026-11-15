@@ -11,7 +11,7 @@ use nsh_core::element::desktop::{Window, current_window, window};
 use nsh_core::prelude::*;
 
 use crate::app::{App, Note, NoteCommand};
-use crate::model::{Look, NoteMeta, Rect, Rgb};
+use crate::model::{NoteMeta, Rect, Rgb};
 use crate::ui::TextLook;
 use crate::{bubble, drag, editor_view, layout, note_menu, win};
 
@@ -53,14 +53,14 @@ fn frame(rect: Rect) -> WindowFrame {
     WindowFrame { x: Some(px(rect.x)), y: Some(px(rect.y)), width: Some(px(rect.w)), height: Some(px(rect.h)), animated: None }
 }
 
-fn attributes(look: &Look, resizable: bool) -> WindowAttributes {
+fn attributes(always_on_top: bool, resizable: bool) -> WindowAttributes {
     let mut a = WindowAttributes::default();
     a.frame = Some(WindowFrameStyle::None);
     a.transparent = Some(true);
     a.taskbar = Some(false);
     a.shadow = Some(false);
     a.resizable = Some(resizable);
-    a.level = Some(if look.always_on_top { WindowLevel::Floating } else { WindowLevel::Normal });
+    a.level = Some(if always_on_top { WindowLevel::Floating } else { WindowLevel::Normal });
     a
 }
 
@@ -107,12 +107,24 @@ pub fn note_window(app: App, note: Note) -> Window {
     // A bubble's note is shut until the pointer or a click opens it.
     let bubble_open = signal(false);
     let start = shape_rect(&meta.get_untracked(), false);
+    // What the window's title and attributes come from, set only when it
+    // really changes: NSH applies a window's attributes again each time
+    // they're given, which takes the keyboard focus from the text, and the
+    // note changes on every save.
+    let facts = move || meta.with(|m| (window_title(m), m.look.always_on_top, !m.locked && !m.rolled_up && (!m.bubble.enabled || bubble_open.get())));
+    let shown = signal(untracked(facts));
+    effect(move || {
+        let now = facts();
+        if shown.with_untracked(|s| *s != now) {
+            shown.set(now);
+        }
+    });
     window()
         .id(window_id(&note.id))
-        .title(move || meta.with(|m| window_title(m)))
+        .title(move || shown.with(|s| s.0.clone()))
         .default_size(size(px(start.w), px(start.h)))
         .default_position(WindowPosition::At(point(px(start.x), px(start.y))))
-        .attributes(move || meta.with(|m| attributes(&m.look, !m.locked && !m.rolled_up && (!m.bubble.enabled || bubble_open.get()))))
+        .attributes(move || shown.with(|s| attributes(s.1, s.2)))
         .content(move || {
             let window = current_window();
 
@@ -217,18 +229,30 @@ pub fn note_window(app: App, note: Note) -> Window {
                 }
             });
             dynamic(move || {
-                if is_bubble.get() {
-                    let inner = card_note.clone();
-                    bubble::bubble_view(app, bubble_note.clone(), bubble_open, move || card(app, inner.clone()).into_element()).into_element()
-                } else {
-                    card(app, card_note.clone()).into_element()
-                }
+                let is_bubble = is_bubble.get();
+                // Built untracked: whatever building it reads (the note's
+                // settings among it) must not make it again.
+                untracked(|| {
+                    if is_bubble {
+                        let inner = card_note.clone();
+                        bubble::bubble_view(app, bubble_note.clone(), bubble_open, move || card(app, inner.clone()).into_element()).into_element()
+                    } else {
+                        card(app, card_note.clone()).into_element()
+                    }
+                })
             })
         })
 }
 
 /// The note's card: what a note looks like, filling its parent.
 pub fn card(app: App, note: Note) -> impl IntoElement {
+    // Built untracked: what building it reads of the note (its look, its
+    // title) must not make whatever holds the card build it again, which
+    // would take the keyboard focus from the text on every save.
+    untracked(move || card_built(app, note))
+}
+
+fn card_built(app: App, note: Note) -> impl IntoElement {
     let meta = note.meta;
     let window = current_window();
     let look = move || meta.with(|m| m.look.clone());

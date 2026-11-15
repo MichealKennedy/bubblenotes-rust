@@ -65,3 +65,20 @@ For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets 
 - **No video inside notes:** NSH 0.5.1's web view draws only in the main window, so YouTube links open in the browser
 - **Ghost notes go around NSH:** it refuses click-through windows to Rust apps, so `win.rs` sets the window style itself and sets it again after NSH resets it
 - **Right-click menus are native**: a drawn menu would be clipped by a small note's window
+
+## Patched framework
+
+`vendor/nsh-base` and `vendor/nsh-platform-windows` are NSH 0.5.1 with two
+fixes of ours, used through `[patch.crates-io]` in `Cargo.toml`. Search them
+for `BUBBLENOTES PATCH`:
+
+- `vendor/nsh-platform-windows/src/text_input.rs`: a text field whose text
+  is fully transparent draws nothing. Without it the rich editor's hidden
+  input drew a black speck at the caret.
+- `vendor/nsh-base/src/rich_editor/view/geometry.rs`: on Windows the caret
+  counts the spaces at a line's end. Without it the caret stood still after
+  a typed space.
+
+When NSH is upgraded: copy the new crates over these and apply the same
+changes again, or drop the copies and the `[patch.crates-io]` section if NSH
+has fixed both.

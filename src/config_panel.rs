@@ -829,6 +829,7 @@ fn row_dyn(label: impl Fn() -> String + 'static, control: impl IntoElement + 'st
 
 pub(crate) fn styled_switch(checked: impl Fn() -> bool + 'static, set: impl Fn(bool) + 'static, label: &'static str) -> impl IntoElement {
     switch()
+        .cursor(Cursor::Pointer)
         .checked(checked)
         .accessibility_label(label)
         .hit_slop(EdgeInsets::all(px(6.0)))
@@ -973,6 +974,7 @@ fn segmented<T: Copy + PartialEq + 'static>(
             let (value, set) = (value.clone(), set.clone());
             let on = value.clone();
             toggle()
+                .cursor(Cursor::Pointer)
                 .flex_1()
                 .h(px(26.0))
                 .items_center()
@@ -998,6 +1000,7 @@ fn choice(items: Vec<(&'static str, &'static str)>, value: impl Fn() -> String +
     };
     view().child(
         select()
+            .cursor(Cursor::Pointer)
             .items(items.iter().map(|(id, t)| SelectItem::new(*id, *t)).collect::<Vec<_>>())
             .value(move || Some(SharedString::from(value())))
             .margin(px(6.0))
@@ -1077,6 +1080,7 @@ fn radio_mark(checked: impl Fn() -> bool + Clone + 'static, select: impl Fn() + 
     let dot = checked.clone();
     let ring = checked.clone();
     radio()
+        .cursor(Cursor::Pointer)
         .checked(checked)
         .hit_slop(EdgeInsets::all(px(6.0)))
         .on_change(move |_: &bool| select())
@@ -1104,7 +1108,7 @@ pub(crate) fn small_button(label: impl Fn() -> String + 'static, press: impl Fn(
         .border_color(move || theme().border)
         .bg(move || theme().secondary)
         .active(|s| s.opacity(0.7))
-        .on_press(move || press())
+        .cursor(Cursor::Pointer).on_press(move || press())
         .child(text(label).text_size(px(12.0)).text_color(move || theme().secondary_foreground))
 }
 
@@ -1117,7 +1121,7 @@ pub(crate) fn primary_button(label: impl Fn() -> String + 'static, press: impl F
         .rounded(px(6.0))
         .bg(move || theme().primary)
         .active(|s| s.opacity(0.75))
-        .on_press(move || press())
+        .cursor(Cursor::Pointer).on_press(move || press())
         .child(text(label).text_size(px(12.0)).font_weight(FontWeight::MEDIUM).text_color(move || theme().primary_foreground))
 }
 
@@ -1127,7 +1131,7 @@ fn link_button(label: impl Fn() -> String + 'static, press: impl Fn() + 'static)
         .h(px(22.0))
         .justify_center()
         .active(|s| s.opacity(0.6))
-        .on_press(move || press())
+        .cursor(Cursor::Pointer).on_press(move || press())
         .child(text(label).text_size(px(12.0)).text_color(move || theme().primary))
 }
 
@@ -1141,7 +1145,7 @@ fn icon_button(glyph: &'static str, label: &'static str, press: impl Fn() + 'sta
         .accessibility_label(label)
         .hover(|s| s.bg(theme().accent))
         .active(|s| s.opacity(0.6))
-        .on_press(move || press())
+        .cursor(Cursor::Pointer).on_press(move || press())
         .child(text(glyph).text_size(px(13.0)).text_color(move || theme().muted_foreground))
 }
 

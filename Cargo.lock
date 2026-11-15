@@ -1923,8 +1923,6 @@ dependencies = [
 [[package]]
 name = "nsh-base"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cadcf71a3a758271ee9ab5d4768de9054d1a97091eece01fa1a174b394ef53e"
 dependencies = [
  "chrono",
  "html5ever",
@@ -2089,8 +2087,6 @@ dependencies = [
 [[package]]
 name = "nsh-platform-windows"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d927d3e0d58f8db6f16c76d62d45c80070a66654817acbc209f309159cdc9884"
 dependencies = [
  "crossbeam-channel",
  "image",

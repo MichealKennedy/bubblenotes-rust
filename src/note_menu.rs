@@ -720,7 +720,7 @@ fn category_window(app: App) -> impl IntoElement {
 /// A dialog's button: `primary` is the filled one.
 fn dialog_button(label: &'static str, primary: bool, press: impl Fn() + 'static) -> impl IntoElement {
     button()
-        .on_press(press)
+        .cursor(Cursor::Pointer).on_press(press)
         .h(px(30.0))
         .px_4()
         .items_center()

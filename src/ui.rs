@@ -88,6 +88,10 @@ pub fn button(
         .style_when(move || !enabled_style(), |s| s.opacity(0.35))
         .active(|s| s.opacity(0.6))
         .label(description)
+        // Not a stop of the keyboard focus: a press leaves it in the text, so
+        // the selection (and the menu over it) stays.
+        .focusable(false)
+        .cursor(Cursor::Pointer)
         .on_press(move || {
             if enabled_press() {
                 press()
@@ -294,12 +298,13 @@ fn tool(ctx: Ctx, action: &'static Action) -> AnyElement {
     let enabled = move || ctx.is_enabled(action);
     if action.active.is_some() {
         let toggle = nsh_base::toggle()
+            .cursor(Cursor::Pointer)
             .pressed(move || ctx.is_active(action))
             .accessibility_label(action.label)
             .on_change(move |_: &bool| ctx.perform(action));
         tool_look!(toggle, move || ctx.is_active(action), enabled).child(hinted(hint(action.label, action.hint), glyph)).into_element()
     } else {
-        let button = nsh_base::button().accessibility_label(action.label).on_press(move || {
+        let button = nsh_base::button().accessibility_label(action.label).cursor(Cursor::Pointer).on_press(move || {
             if ctx.is_enabled(action) {
                 ctx.perform(action);
             }
@@ -328,7 +333,7 @@ fn swatches(ctx: Ctx) -> AnyElement {
             })
             .hover(|s| s.scale(1.12))
             .active(|s| s.opacity(0.6))
-            .on_press(move || set_color(ctx, css))
+            .cursor(Cursor::Pointer).on_press(move || set_color(ctx, css))
             .child(hinted(hint(label, ""), text(if rgb.is_none() { "A" } else { "" }).text_size(px(10.0)).text_color(move || theme().foreground)))
             .into_element()
     };
@@ -345,7 +350,7 @@ fn swatches(ctx: Ctx) -> AnyElement {
 /// "More": a native menu with the slots that didn't fit, by group.
 fn more_button(ctx: Ctx, hidden: Vec<Vec<Slot>>) -> AnyElement {
     let hidden = Rc::new(hidden);
-    let button = nsh_base::button().accessibility_label("More formatting").on_press(move || {
+    let button = nsh_base::button().accessibility_label("More formatting").cursor(Cursor::Pointer).on_press(move || {
         let mut items = Vec::new();
         for (i, group) in hidden.iter().enumerate() {
             if i > 0 {
@@ -545,7 +550,7 @@ fn menu_row(
         // text, so typing goes on after picking (a row that took it would
         // take it away with it when the menu closes).
         .focusable(false)
-        .on_press(press)
+        .cursor(Cursor::Pointer).on_press(press)
         .child(
             view()
                 .w(px(30.0))
@@ -556,11 +561,12 @@ fn menu_row(
                 .border_1()
                 .border_color(move || theme().border)
                 .bg(move || theme().background)
-                .child(text(action.glyph).text_size(px(13.0))),
+                .child(text(action.glyph).text_size(px(13.0)).text_color(move || theme().popover_foreground)),
         )
         .child(
             view()
-                .child(text(action.label).text_size(px(14.0)))
+                // Its own colour: text here doesn't take the popup's.
+                .child(text(action.label).text_size(px(14.0)).text_color(move || theme().popover_foreground))
                 .child(text(action.hint).text_size(px(12.0)).text_color(move || theme().muted_foreground)),
         )
 }
@@ -573,7 +579,8 @@ fn menu_row(
 pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
     // The menu can't be drawn outside its window: in a small note it wraps.
     let window = nsh_core::element::desktop::current_window();
-    let fit = move || window.state().map(|s| s.bounds.size.width.0 - 12.0).unwrap_or(400.0);
+    let sized = window.clone();
+    let fit = move || sized.state().map(|s| s.bounds.size.width.0 - 12.0).unwrap_or(400.0);
     let more = signal(false);
     let link = signal(String::new());
     // A new selection closes "…" and the link editor.
@@ -676,13 +683,20 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
                     .into_element()
                 }))
         };
+        // The menu can't be drawn outside its window either: in a short
+        // note the panel scrolls.
+        let room = window.state().map(|s| s.bounds.size.height.0 - 200.0).unwrap_or(400.0).max(110.0);
         let more_panel = view()
             .style_when(move || !more.get(), |s| s.hidden())
             .border_t_1()
             .border_color(move || theme().border)
             .pt_1()
-            .child(section("Insert", actions::SELECTION_MORE_INSERT))
-            .child(section("Format", actions::SELECTION_MORE_FORMAT));
+            .child(
+                scroll()
+                    .max_h(px(room))
+                    .child(section("Insert", actions::SELECTION_MORE_INSERT))
+                    .child(section("Format", actions::SELECTION_MORE_FORMAT)),
+            );
         Some(surface.child(row).child(more_panel).into_element())
     })
 }
@@ -777,10 +791,15 @@ pub fn editor_classes(look: &TextLook) -> RichEditorClasses {
         Some(color) => format!("bg-[#{color:06x}]/{strength}").into(),
         None => format!("bg-primary/{strength}").into(),
     });
+    // The caret in the text's colour (the theme's would be white on a pale
+    // note in dark mode).
+    if let Some(color) = look.color {
+        classes.caret = Some(format!("bg-[#{color:06x}]").into());
+    }
     classes.placeholder = Some(format!("text-{muted}").into());
     classes.list_marker = Some(format!("text-{muted}").into());
     classes.task_checkbox =
-        Some(format!("size-4 mr-2 mt-1 rounded border border-{line} checked:bg-{checked} checked:border-{checked}").into());
+        Some(format!("size-4 mr-2 mt-1 rounded cursor-pointer border border-{line} checked:bg-{checked} checked:border-{checked}").into());
     let nodes: Vec<(&str, String)> = vec![
         ("paragraph", "leading-relaxed".into()),
         ("heading[level=1]", "text-3xl font-bold tracking-tight".into()),

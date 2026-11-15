@@ -150,7 +150,7 @@ fn icon_button(markup: &'static str, label: &'static str, press: impl Fn() + 'st
         .text_color(move || theme().muted_foreground)
         .hover(|s| s.bg(tint(0.08)))
         .active(|s| s.opacity(0.6))
-        .on_press(press)
+        .cursor(Cursor::Pointer).on_press(press)
         .child(ui::hinted(tip(label), icon(markup, 14.0)))
 }
 
@@ -270,7 +270,7 @@ fn sidebar_button(markup: &'static str, label: &'static str, primary: bool, pres
         .bg(move || if primary { theme().primary } else { tint(0.06) })
         .hover(move |s| if primary { s.opacity(0.88) } else { s.bg(tint(0.1)) })
         .active(|s| s.opacity(0.7))
-        .on_press(press)
+        .cursor(Cursor::Pointer).on_press(press)
         .child(icon(markup, 14.0).text_color(ink))
         .child(text(label).text_size(px(13.0)).font_weight(FontWeight::MEDIUM).text_color(ink))
 }
@@ -489,7 +489,7 @@ fn result_row(m: Manager, note: Note, around: String) -> impl IntoElement {
         .rounded(px(6.0))
         .bg(move || if selected() { tint(0.1) } else { tint(0.0) })
         .hover(|s| s.bg(tint(0.05)))
-        .on_press(move |e: &PressEvent| {
+        .cursor(Cursor::Pointer).on_press(move |e: &PressEvent| {
             app.selected.set(Some(press_note.id.clone()));
             if e.clicks == 2 {
                 app.show_on_desktop(&press_note);
@@ -540,7 +540,7 @@ fn trash_section(m: Manager) -> impl IntoElement {
                 .h(px(38.0))
                 .px(px(18.0))
                 .hover(|s| s.bg(tint(0.04)))
-                .on_press(move || m.trash_open.update(|o| *o = !*o))
+                .cursor(Cursor::Pointer).on_press(move || m.trash_open.update(|o| *o = !*o))
                 .child(
                     icon(ICON_CHEVRON, 11.0)
                         .text_color(move || theme().muted_foreground)
@@ -605,7 +605,7 @@ fn trash_row(m: Manager, note: Note) -> impl IntoElement {
         .rounded(px(6.0))
         .bg(move || if selected() { tint(0.1) } else { tint(0.0) })
         .hover(|s| s.bg(tint(0.05)))
-        .on_press(move || app.selected.set(Some(press.id.clone())))
+        .cursor(Cursor::Pointer).on_press(move || app.selected.set(Some(press.id.clone())))
         .on_context_menu(move |_: &ContextMenuEvent| trash_menu(m, &menu))
         .child(dot(move || meta.with(|m| m.look.background)).opacity(0.6))
         .child(text(move || meta.with(|m| m.title.clone())).truncate().flex_1().text_size(px(13.0)).text_color(move || theme().muted_foreground))
@@ -622,7 +622,9 @@ fn note_pane(m: Manager) -> impl IntoElement {
     view().flex_1().min_w(px(0.0)).child(dynamic(move || {
         let selected = app.selected.get();
         match selected.and_then(|id| untracked(|| app.note(&id))) {
-            Some(note) => note_view(m, note).into_element(),
+            // Built untracked: what building it reads of the note must not
+            // make it again (the text would lose the keyboard focus).
+            Some(note) => untracked(|| note_view(m, note).into_element()),
             None => {
                 if untracked(|| live_notes(app).is_empty()) {
                     empty_state("Your notes will show here", "Make one with “New note” on the left.").into_element()
@@ -742,6 +744,7 @@ fn category_picker(app: App, note: Note) -> impl IntoElement {
     let meta = note.meta;
     let label = move || meta.with(|m| if m.category.is_empty() { "No category".to_string() } else { m.category.replace('/', " / ") });
     select()
+        .cursor(Cursor::Pointer)
         .items(move || {
             std::iter::once(SelectItem::new(NO_CATEGORY, "No category"))
                 .chain(app.categories().into_iter().map(|c| SelectItem::new(c.clone(), c.replace('/', " / "))))
@@ -826,7 +829,7 @@ fn status_line(app: App, ctx: ui::Ctx, note: Note) -> impl IntoElement {
                 .bg(move || if on_desktop() { tint(0.1) } else { tint(0.0) })
                 .hover(|s| s.bg(tint(0.07)))
                 .active(|s| s.opacity(0.6))
-                .on_press(move || {
+                .cursor(Cursor::Pointer).on_press(move || {
                     if on_desktop() {
                         app.update(&note, |m| m.on_desktop = false);
                     } else {

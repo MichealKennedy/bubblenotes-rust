@@ -106,7 +106,7 @@ impl NodeView for ToggleView {
                     .rounded(px(5.0))
                     .active(|s| s.opacity(0.5))
                     .label(move || if is_open() { "Collapse".to_string() } else { "Expand".to_string() })
-                    .on_press(move || {
+                    .cursor(Cursor::Pointer).on_press(move || {
                         let Some(pos) = get_pos() else { return };
                         let state = session.state();
                         let Some(command) = set_open(state.doc(), pos, !is_open()) else { return };

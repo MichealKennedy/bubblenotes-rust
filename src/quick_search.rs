@@ -155,7 +155,7 @@ fn search_box(app: App) -> impl IntoElement {
                                 index.set(i);
                             }
                         })
-                        .on_press(move || open(&pressed))
+                        .cursor(Cursor::Pointer).on_press(move || open(&pressed))
                         .child(view().w(px(10.0)).h(px(10.0)).rounded_full().bg(move || crate::note_window::color(dot.with(|m| m.look.background), 1.0)))
                         .child(
                             view()

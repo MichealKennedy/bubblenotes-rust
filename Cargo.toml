@@ -27,3 +27,10 @@ nsh-platform-macos = { version = "0.5.1", default-features = false, features = [
 
 [target.'cfg(target_os = "windows")'.dependencies]
 nsh-platform-windows = { version = "0.5.1", default-features = false, features = ["rich-editor", "emoji-picker"] }
+
+# NSH 0.5.1 with two fixes of ours for Windows (search the copies for
+# "BUBBLENOTES PATCH"; see "Patched framework" in the README). Drop these
+# once NSH has them.
+[patch.crates-io]
+nsh-base = { path = "vendor/nsh-base" }
+nsh-platform-windows = { path = "vendor/nsh-platform-windows" }
