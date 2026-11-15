@@ -1,0 +1,8 @@
+{
+  "name": "Rich Notes",
+  "id": "com.example.richnotes",
+  "version": "1.0.0",
+  "build": 1,
+  "rust": ".",
+  "root": "App"
+}

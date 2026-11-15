@@ -1,0 +1,26 @@
+[package]
+name = "nsh-app-richnotes"
+version = "0.1.0"
+edition = "2024"
+# NSH 0.5.1 needs Rust 1.97 or newer (`rustup update stable`).
+rust-version = "1.97"
+publish = false
+
+[workspace]
+
+[dependencies]
+nsh-core = "0.5.1"
+# Only the rich-text editor: no code editor, syntax highlighting or JS runtime.
+nsh-base = { version = "0.5.1", default-features = false, features = ["rich-editor"] }
+env_logger = "0.11"
+serde_json = "1"
+
+# The desktop backends `cargo run` uses (GTK 4, AppKit, Win32).
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-platform-linux = { version = "0.5.1", default-features = false, features = ["rich-editor"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos = { version = "0.5.1", default-features = false, features = ["rich-editor"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+nsh-platform-windows = { version = "0.5.1", default-features = false, features = ["rich-editor"] }
