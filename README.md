@@ -90,8 +90,10 @@ for `BUBBLENOTES PATCH`:
 - `vendor/nsh-platform-windows/src/app_window.rs` and `surface.rs`: a
   window of the app's own that is resized waits for the layout at its new
   size before it draws (`Surface::await_turn`), and one that is made smaller
-  shows its smaller content first (`shrink_first`). Without them a note
-  resized by its edge showed its rounded corners square for a frame.
+  shows its smaller content first (`shrink_first`); resized by its left
+  or top edge, it lays out first and moves in step with the screen's
+  frames. Without them a note resized by an edge showed its far corners
+  square, or jumping, for a frame.
 
 When NSH is upgraded: copy the new crates over these and apply the same
 changes again, or drop the copies and the `[patch.crates-io]` section if NSH

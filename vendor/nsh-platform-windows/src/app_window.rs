@@ -526,10 +526,29 @@ fn shrink_first(surface: &Rc<Surface>, window: &AppWindow, pos: &WINDOWPOS) {
             return;
         }
     }
+    let (dw, dh) = (pos.cx - (now.right - now.left), pos.cy - (now.bottom - now.top));
     if !pos.flags.contains(SWP_NOMOVE) && (pos.x != now.left || pos.y != now.top) {
+        // Resized by its left or top edge: the window moves, and its
+        // content with it, so nothing can be shown ahead. The window and
+        // its frame at the new size must reach the screen together: the
+        // layout at that size is made now, and the screen's next frame is
+        // waited for, so that the move and the frame `WM_SIZE` then draws
+        // at once both fall in the one after.
+        if dw != 0 || dh != 0 {
+            let pixels = (
+                (client.right - client.left + dw).max(0) as u32,
+                (client.bottom - client.top + dh).max(0) as u32,
+            );
+            if pixels.0 > 0 && pixels.1 > 0 {
+                if resized_to(surface, window, pixels) {
+                    surface.await_turn();
+                }
+                // SAFETY: a plain call.
+                let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
+            }
+        }
         return;
     }
-    let (dw, dh) = (pos.cx - (now.right - now.left), pos.cy - (now.bottom - now.top));
     if dw >= 0 && dh >= 0 {
         return;
     }
