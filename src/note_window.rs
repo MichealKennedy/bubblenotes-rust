@@ -19,6 +19,8 @@ use crate::{bubble, drag, editor_view, layout, note_menu, win};
 pub const TITLE_HEIGHT: f32 = 30.0;
 /// The strip a note without a title is dragged by.
 const HANDLE_HEIGHT: f32 = 12.0;
+/// How long after it stops being used a note fades (milliseconds).
+const FADE_AFTER: f64 = 600.0;
 const MIN_WIDTH: f32 = 140.0;
 const MIN_HEIGHT: f32 = 90.0;
 
@@ -240,6 +242,48 @@ pub fn note_window(app: App, note: Note) -> Window {
                 }
             });
 
+            // "Fade when idle": how solid the note is now, from 0 (faded as
+            // far as it goes) to 1. It's solid under the pointer, with the
+            // keyboard focus, while dragged, and while its menu or its
+            // configuration panel is open; a moment after none of those
+            // holds, it fades. Only this signal changes, read by a style:
+            // nothing is built again.
+            let solid = signal(1.0_f32);
+            {
+                let (window, id) = (window.clone(), note.id.clone());
+                let idle_since = stored(None::<f64>);
+                let _ = set_interval(std::time::Duration::from_millis(40), move || {
+                    let level = solid.get_untracked();
+                    if !meta.with_untracked(|m| m.fade_idle) {
+                        if level != 1.0 {
+                            solid.set(1.0);
+                        }
+                        return;
+                    }
+                    let is_this = |of: Option<std::rc::Rc<str>>| of.is_some_and(|of| of == id);
+                    let active = bubble::pointer_over(&window)
+                        // (NSH's own word on the focus goes stale.)
+                        || win::front_window_title().is_some_and(|front| meta.with_untracked(|m| front == window_title(m)))
+                        || is_this(app.dragging.with_untracked(|d| d.as_ref().map(|d| d.0.clone())))
+                        || is_this(app.config_for.get_untracked())
+                        || is_this(app.menu_for.get_untracked());
+                    let now = crate::store::now_ms();
+                    let target = if active {
+                        idle_since.replace(None);
+                        1.0
+                    } else {
+                        let since = idle_since.get().unwrap_or(now);
+                        idle_since.replace(Some(since));
+                        if now - since >= FADE_AFTER { 0.0 } else { 1.0 }
+                    };
+                    if level != target {
+                        // In at once (about 100 ms), out gently (about 300).
+                        let step = if target > level { 0.4 } else { 0.13 };
+                        solid.set(if (target - level).abs() <= step { target } else { level + step * (target - level).signum() });
+                    }
+                });
+            }
+
             let (card_note, bubble_note) = (note.clone(), note.clone());
             // Only switching between note and bubble makes the content
             // again: any other change (a move, a save) must leave the editor
@@ -251,7 +295,7 @@ pub fn note_window(app: App, note: Note) -> Window {
                     is_bubble.set(now);
                 }
             });
-            dynamic(move || {
+            let content = dynamic(move || {
                 let is_bubble = is_bubble.get();
                 // Built untracked: whatever building it reads (the note's
                 // settings among it) must not make it again.
@@ -263,7 +307,8 @@ pub fn note_window(app: App, note: Note) -> Window {
                         card(app, card_note.clone()).into_element()
                     }
                 })
-            })
+            });
+            view().flex_1().opacity(move || 1.0 - (1.0 - solid.get()) * (1.0 - meta.with(|m| m.idle_opacity.clamp(0.05, 1.0)))).child(content)
         })
 }
 

@@ -454,7 +454,7 @@ fn set_open(app: App, live: Live, open: Signal<bool>, meta: Signal<NoteMeta>, wa
 }
 
 /// Whether the pointer is over `window` (false when that can't be told).
-fn pointer_over(window: &nsh_core::element::desktop::WindowRef) -> bool {
+pub(crate) fn pointer_over(window: &nsh_core::element::desktop::WindowRef) -> bool {
     let (Some(state), Some((x, y))) = (untracked(|| window.state()), win::cursor()) else { return false };
     let scale = state.scale_factor.max(0.1);
     let (x, y, b) = (x / scale, y / scale, state.bounds);

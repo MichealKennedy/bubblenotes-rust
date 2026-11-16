@@ -363,8 +363,19 @@ pub fn show(app: App, note: &Note) {
         versions: &app.versions(note),
     };
     let note = note.clone();
+    let id = note.id.clone();
     let run: Rc<dyn Fn(Action)> = Rc::new(move |action| perform(app, &note, action));
-    let _ = popup_menu(to_menu(entries(&state), &run));
+    let closed = popup_menu(to_menu(entries(&state), &run));
+    // The note knows its menu is showing (a faded note stays solid).
+    app.menu_for.set(Some(id.clone()));
+    app.owner.run(|| {
+        let _ = spawn(async move {
+            closed.await;
+            if app.menu_for.get_untracked().as_deref() == Some(&*id) {
+                app.menu_for.set(None);
+            }
+        });
+    });
 }
 
 fn perform(app: App, note: &Note, action: Action) {

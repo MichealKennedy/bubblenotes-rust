@@ -94,6 +94,8 @@ pub struct App {
     /// Something asked of a note's desktop window (its note's id, what).
     /// The window takes it and sets this back to `None`.
     pub command: Signal<Option<(Rc<str>, NoteCommand)>>,
+    /// The note whose right-click menu is showing.
+    pub menu_for: Signal<Option<Rc<str>>>,
     /// The quick search box is open.
     pub search_open: Signal<bool>,
     /// The program in front, or the last one that was before this app came
@@ -136,6 +138,7 @@ impl App {
             options_open: signal(false),
             dragging: signal(None),
             command: signal(None),
+            menu_for: signal(None),
             search_open: signal(false),
             foreground_app: signal(String::new()),
             ghosts_solid: signal(false),

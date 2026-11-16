@@ -54,6 +54,31 @@ pub fn foreground_app() -> Option<String> {
     None
 }
 
+/// The title of the window in front, when it's one of this app's.
+#[cfg(target_os = "windows")]
+pub fn front_window_title() -> Option<String> {
+    use nsh_platform_windows::windows::Win32::System::Threading::GetCurrentProcessId;
+    use nsh_platform_windows::windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
+    // SAFETY: queries about the foreground window; the buffer outlives the
+    // call that fills it.
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid != GetCurrentProcessId() {
+            return None;
+        }
+        let mut text = [0u16; 512];
+        let len = GetWindowTextW(hwnd, &mut text).max(0) as usize;
+        Some(String::from_utf16_lossy(&text[..len]))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn front_window_title() -> Option<String> {
+    None
+}
+
 /// Whether Ctrl and Alt are both held down.
 #[cfg(target_os = "windows")]
 pub fn ctrl_alt_down() -> bool {

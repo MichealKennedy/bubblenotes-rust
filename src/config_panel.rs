@@ -390,6 +390,7 @@ pub(crate) fn theme_swatches(app: App, current: impl Fn() -> Look + 'static, app
 fn behaviour_part(app: App, note: Note) -> impl IntoElement {
     let meta = note.meta;
     let (n1, n2, n3, n4) = (note.clone(), note.clone(), note.clone(), note.clone());
+    let (n5, n6) = (note.clone(), note.clone());
     view()
         .gap(px(2.0))
         .pb(px(8.0))
@@ -403,6 +404,14 @@ fn behaviour_part(app: App, note: Note) -> impl IntoElement {
                 .text_size(px(11.0))
                 .text_color(move || nsh_base::theme().muted_foreground),
         )
+        .child(switch_row("Fade when idle", move || meta.with(|m| m.fade_idle), move |on| app.update(&n5, |m| m.fade_idle = on)))
+        .child(view().style_when(move || !meta.with(|m| m.fade_idle), |s| s.hidden()).child(slider_row(
+            "Faded to",
+            (10.0, 80.0, 5.0),
+            move || (meta.with(|m| m.idle_opacity) * 100.0).round() as f64,
+            |v| format!("{v:.0}%"),
+            move |v| app.update(&n6, |m| m.idle_opacity = v as f32 / 100.0),
+        )))
 }
 
 fn background_part(app: App, note: Note) -> impl IntoElement {
