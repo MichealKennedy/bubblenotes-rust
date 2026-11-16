@@ -86,7 +86,7 @@ fn remind(app: App, note: &Note, reminder: crate::due::Reminder) {
 }
 
 /// Shows `notification`, asking once to be allowed to.
-fn notify(app: App, notification: Notification) {
+pub(crate) fn notify(app: App, notification: Notification) {
     app.owner.run(|| {
         let _ = spawn(async move {
             let mut permission = notification_permission().await;

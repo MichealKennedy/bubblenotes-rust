@@ -337,6 +337,8 @@ pub struct Settings {
     /// A newer version found is installed by itself (it runs from the next
     /// start); else the user is told and installs it.
     pub auto_update: bool,
+    /// The newer version the user was last told is available (told once).
+    pub update_told: String,
 }
 
 impl Default for Settings {
@@ -357,6 +359,7 @@ impl Default for Settings {
             selection_strength: 35,
             check_updates: true,
             auto_update: true,
+            update_told: String::new(),
         }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "nsh-app-bubblenotes"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 # NSH 0.5.1 needs Rust 1.97 or newer (`rustup update stable`).
 rust-version = "1.97"

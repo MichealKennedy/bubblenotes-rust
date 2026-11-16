@@ -58,18 +58,25 @@ The app updates itself from the releases of its GitHub repository
   newer version is put in place of the program's file by itself; else the
   tray menu and Options offer it. Either way it only starts at the app's
   next start (Options and the tray menu offer a restart): the app never
-  restarts by itself. Only the program's file is replaced; the old one is
-  renamed aside and removed at the next start.
+  restarts by itself. Only the program's file is replaced.
+- **Telling:** a notification says when a version was installed by itself
+  and waits for a restart, or (automatic installing off) that one is
+  available, once for each version.
+- **A bad release:** the replaced program file is kept beside the new one
+  for the new version's first minute of running. If the new version fails
+  in that minute (anything the crash log catches), the old file is put
+  back and started, and that version is no longer installed by itself
+  (Options still offers it). A version that hangs, or can't start at all,
+  isn't caught.
 - **Releasing:** set the version in `Cargo.toml` and `nsh.json`, then run
-  `.
-elease.ps1 "What changed."` and publish the three files it writes to
+  `.\release.ps1 "What changed."` and publish the three files it writes to
   `dist\` as a GitHub release (it prints the command). The release key is
-  in `~\.bubblenotes
-elease.secret`: keep a backup of it, and never commit
+  in `~\.bubblenotes\release.secret`: keep a backup of it, and never commit
   it. Without it no release can be made that the apps out there accept.
 - A development run (`BUBBLENOTES_DIR`) never asks GitHub. With
   `BUBBLENOTES_UPDATE=<url of a latest.json>` it asks there instead (a
-  server on this machine, for testing).
+  server on this machine, for testing); `BUBBLENOTES_DEV=crashat:<version>`
+  makes that version fail three seconds after its start.
 
 ## Run and test
 

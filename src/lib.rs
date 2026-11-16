@@ -58,7 +58,7 @@ mod system;
 mod toggle;
 mod tray;
 mod ui;
-mod update;
+pub mod update;
 mod win;
 
 use nsh_core::desktop::WindowAttributes;

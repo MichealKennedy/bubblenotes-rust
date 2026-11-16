@@ -4,6 +4,9 @@
 //! and the app ends: a half-dead app in the tray is worse than none, and
 //! the notes are saved as they're typed.
 //!
+//! When what failed is a new version in its first minute, the version
+//! before is put back and started (`update`).
+//!
 //! Each entry has the time, the app's version, what failed and where, and
 //! the calls that led there.
 
@@ -72,14 +75,26 @@ fn write(entry: &str) -> Option<PathBuf> {
 }
 
 /// Tells the user and ends the app. (A development run just ends: nobody
-/// is there to press OK.)
+/// is there to press OK.) A new version that failed in its first minute is
+/// taken back first, and the version before started after.
 fn end(log: Option<PathBuf>) -> ! {
+    let back = crate::update::roll_back();
     if std::env::var_os("BUBBLENOTES_DIR").is_none() {
-        let text = match &log {
-            Some(path) => format!("Bubble Notes ran into a problem and has to close.\n\nYour notes are saved as you type. What went wrong was written to:\n{}", path.display()),
+        let mut text = match &back {
+            Some((version, _)) => format!(
+                "The update to version {} ran into a problem, so version {version} was put back. It starts when you press OK.\n\nYour notes are saved as you type.",
+                env!("CARGO_PKG_VERSION")
+            ),
             None => "Bubble Notes ran into a problem and has to close.\n\nYour notes are saved as you type.".to_string(),
         };
+        if let Some(path) = &log {
+            text.push_str(&format!(" What went wrong was written to:\n{}", path.display()));
+        }
         native::tell(&text);
+    }
+    if let Some((_, program)) = back {
+        // (As a restart does: the new process waits for this one to end.)
+        let _ = std::process::Command::new(program).args(std::env::args_os().skip(1)).env(nsh_core::restart::WAIT_FOR_ENV, std::process::id().to_string()).spawn();
     }
     std::process::exit(101)
 }
