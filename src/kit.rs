@@ -157,12 +157,16 @@ impl Kit {
     pub fn new(relay: Relay) -> Rc<Self> {
         let manager = ExtensionManager::with_core(vec![
             relay.shortcuts(),
-            starter_kit(),
+            // List and checklist items come from `list_items` instead.
+            starter_kit().configure(serde_json::json!({ "listItem": false, "taskItem": false })),
             table_kit(),
             toggle::extension(),
             media::extension(),
             links::extension(),
-        ])
+        ]
+        .into_iter()
+        .chain(list_items())
+        .collect())
         .expect("the editor's extensions resolve");
         let schema = manager.schema().clone();
         // The slash menu comes first: while it's open, its Enter and arrows
@@ -194,6 +198,26 @@ impl Kit {
         session.subscribe(Arc::new(move |_| relay.push(AppEvent::Changed)));
         Editor { session, kit: self.clone() }
     }
+}
+
+/// The starter kit's list item and checklist item, which may also start
+/// with a toggle (theirs must start with a paragraph, so a toggle made on an
+/// item's first line left the line behind and went under it, empty).
+fn list_items() -> Vec<Extension> {
+    use nsh_base::rich_editor::extensions::{kit, starter::nodes};
+    const CONTENT: &str = "(paragraph | toggle) block*";
+    vec![
+        kit::list_item().with_node_spec(|_| {
+            let mut spec = nodes::list_item().1;
+            spec.content = Some(CONTENT.into());
+            spec
+        }),
+        kit::task_item().with_node_spec(|_| {
+            let mut spec = nodes::task_item().1;
+            spec.content = Some(CONTENT.into());
+            spec
+        }),
+    ]
 }
 
 // ----- One open document ------------------------------------------------------

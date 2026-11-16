@@ -22,7 +22,9 @@ use serde_json::{Value, json};
 
 /// The three node types, as one extension.
 pub fn extension() -> Extension {
-    Extension::new("toggleKit").add_extensions(|_| {
+    // Before the editor's own Enter, which can't split a title and so does
+    // nothing there.
+    Extension::new("toggleKit").with_priority(1000).add_keyboard_shortcuts(|_| vec![("Enter".into(), enter_title())]).add_extensions(|_| {
         vec![
             Extension::node("toggle", |_| {
                 let mut spec = NodeSpec::default();
@@ -147,6 +149,45 @@ fn set_open(doc: &Node, pos: usize, open: bool) -> Option<BoxCommand> {
         dispatch(tr);
         true
     }))
+}
+
+/// Enter in a toggle's title: the caret goes into the body (opened), on a
+/// new first line that takes what was after the caret in the title. An
+/// empty first line already there is used as it is.
+fn enter_title() -> BoxCommand {
+    Arc::new(|state, dispatch| {
+        let from = state.selection().resolved_from().clone();
+        if from.parent().ty().name() != "toggleTitle" || !state.selection().empty() {
+            return false;
+        }
+        let Some(dispatch) = dispatch else { return true };
+        let (pos, end) = (from.pos, from.end(from.depth));
+        let toggle = from.node(from.depth - 1);
+        let toggle_pos = from.before(from.depth - 1);
+        let tail = from.parent().content().cut(pos - from.start(from.depth), end - from.start(from.depth));
+        let first_is_empty = toggle.child(1).first_child().is_some_and(|n| n.ty().name() == "paragraph" && n.content().size() == 0);
+        let mut tr = state.tr();
+        if tail.size() > 0 && tr.delete(pos, end).is_err() {
+            return false;
+        }
+        // The title now ends at `pos`: the body starts after it, its first
+        // block one further in.
+        let body = pos + 1;
+        if tail.size() > 0 || !first_is_empty {
+            let Some(paragraph) = state.schema().node_type("paragraph").and_then(|ty| ty.create(None, tail, Vec::new()).ok()) else { return false };
+            if tr.insert_node(body + 1, paragraph).is_err() {
+                return false;
+            }
+        }
+        let _ = tr.set_node_attribute(toggle_pos, "open", Value::Bool(true));
+        let _ = tr.set_node_attribute(body, "open", Value::Bool(true));
+        if let Ok(at) = tr.doc().resolve(body + 2) {
+            tr.set_selection(nsh_base::rich_editor::state::TextSelection::new(at.clone(), at).into());
+        }
+        tr.scroll_into_view();
+        dispatch(tr);
+        true
+    })
 }
 
 /// A command turning the text block at the selection into a toggle whose
