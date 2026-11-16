@@ -692,7 +692,7 @@ impl Surface {
     /// `await_layout` does for the main window. Without it such a window's
     /// frame in `WM_SIZE` drew the layout of its old size: a see-through
     /// window being made smaller showed its content cut off (its rounded
-    /// corners square) until the next frame. At most [`RESIZE_WAIT`].
+    /// corners square) until the next frame. At most 300 ms.
     pub(crate) fn await_turn(self: &Rc<Self>) {
         if self.mounter.try_borrow_mut().is_err() || self.control.borrow().is_none() {
             return;
@@ -705,7 +705,9 @@ impl Surface {
         let done = Arc::new(AtomicBool::new(false));
         let flag = done.clone();
         self.control(|c| c.flush(move |_| flag.store(true, Ordering::Release)));
-        let deadline = std::time::Instant::now() + RESIZE_WAIT;
+        // Longer than the main window waits: a note full of text takes a
+        // while to wrap again, and a frame late is what shows.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
         let mut applied = false;
         loop {
             // Read first: what was submitted before it is then in the channel.
