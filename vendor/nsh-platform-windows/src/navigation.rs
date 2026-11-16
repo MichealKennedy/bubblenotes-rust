@@ -1365,6 +1365,13 @@ impl Nav {
         let frame = rect(0.0, 0.0, f.size.width.0, f.size.height.0);
         set_frame(view, frame);
         let size = frame.size;
+        // BUBBLENOTES PATCH: a root that opens as a window of its own later
+        // in this batch is not laid out at the main window's size first
+        // (a long text wrapped twice more: a note took half a second to
+        // open).
+        if crate::app_window::opening(id) {
+            return;
+        }
         report(surface, id, &mut m.reported, size, safe_area(surface));
     }
 

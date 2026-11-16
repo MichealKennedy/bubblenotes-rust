@@ -146,6 +146,12 @@ for `BUBBLENOTES PATCH`:
   (`EditorSession::scroll_top`), and a new view of it starts there. Without
   it a note shown again (hidden and shown, its bubble opened, the app
   started) was back at its top.
+- `vendor/nsh-platform-windows/src/app_window.rs`, `navigation.rs` and
+  `surface.rs`: a window of the app's own that opens is laid out once, at
+  the size it opens with (`AppWindow::sized`, `app_window::opening`).
+  Without it the content was also laid out at the main window's size and
+  at 20 by 20 pixels first; a long note took half a second to open, and
+  showed its top before it moved to where it was scrolled.
 
 When NSH is upgraded: copy the new crates over these and apply the same
 changes again, or drop the copies and the `[patch.crates-io]` section if NSH

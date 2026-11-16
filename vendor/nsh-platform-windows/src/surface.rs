@@ -973,6 +973,8 @@ impl Surface {
 
     fn apply(self: &Rc<Self>, batch: &MountBatch) {
         crate::access::prepare(batch);
+        // BUBBLENOTES PATCH: see `app_window::opening`.
+        crate::app_window::note_opening(batch);
         for item in &batch.items {
             self.anim.borrow_mut().apply(item);
             if !matches!(
@@ -997,6 +999,7 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        crate::app_window::opening_done();
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.borrow() {
             model.apply(batch);

@@ -106,6 +106,8 @@ pub(crate) struct AppWindow {
     /// A policy hid it, reported as `Closed`: it waits for the app to
     /// remove its root.
     closed: Cell<bool>,
+    /// BUBBLENOTES PATCH: it was placed (`open`): its size counts.
+    sized: Cell<bool>,
     /// The state last reported.
     state: Cell<Option<WindowState>>,
 }
@@ -199,6 +201,40 @@ fn window_hwnd(surface: &Surface, id: NodeId) -> Option<HWND> {
 
 fn report(surface: &Surface, id: NodeId, event: WindowEvent) {
     surface.event(id, EventKind::Window, EventPayload::Window(Box::new(event)));
+}
+
+thread_local! {
+    /// BUBBLENOTES PATCH: the roots the batch being applied opens as
+    /// windows of their own.
+    static OPENING: RefCell<Vec<NodeId>> = const { RefCell::new(Vec::new()) };
+}
+
+/// BUBBLENOTES PATCH: notes the roots `batch` opens as windows, before it
+/// is applied: each is first inserted as a modal over the main window,
+/// whose size must not be reported for it (`navigation::size_modal`).
+pub(crate) fn note_opening(batch: &nsh_core::MountBatch) {
+    let ids: Vec<NodeId> = batch
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            nsh_core::MountItem::Command {
+                id,
+                command: nsh_core::Command::Desktop(desktop),
+            } if matches!(**desktop, DesktopCommand::OpenWindow(_)) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    OPENING.with(|o| *o.borrow_mut() = ids);
+}
+
+/// BUBBLENOTES PATCH: whether root `id` opens as a window in this batch.
+pub(crate) fn opening(id: NodeId) -> bool {
+    OPENING.with(|o| o.borrow().contains(&id))
+}
+
+/// BUBBLENOTES PATCH: the batch was applied.
+pub(crate) fn opening_done() {
+    OPENING.with(|o| o.borrow_mut().clear());
 }
 
 /// A desktop command addressed to dialog root `id`.
@@ -307,6 +343,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         opening_mode: Cell::new(None),
         closed: Cell::new(false),
         state: Cell::new(None),
+        sized: Cell::new(false),
     });
     let weak = Rc::downgrade(&window);
     view.set_invalidate(Rc::new(move |_, _| {
@@ -318,6 +355,8 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     crate::shell::sync(surface, hwnd, None, resolved);
     place(&window, open);
     hold_owner(&window);
+    // BUBBLENOTES PATCH: only now is its size the one it opens with.
+    window.sized.set(true);
     resized(surface, &window);
     // Shown once the engine has laid out and drawn what it shows: after
     // the batches of the size just reported ([`first_show`]), or after a
@@ -571,6 +610,13 @@ fn shrink_first(surface: &Rc<Surface>, window: &AppWindow, pos: &WINDOWPOS) {
 
 /// The window's client area is (or is about to be) `pixels` big.
 fn resized_to(surface: &Surface, window: &AppWindow, pixels: (u32, u32)) -> bool {
+    // BUBBLENOTES PATCH: a window being made has a token size (20 by 20
+    // pixels) until it is placed. The core laid the whole content out at
+    // that size (a long text wrapped into a sliver: half a second), and
+    // again at the real one.
+    if !window.sized.get() {
+        return false;
+    }
     let scale = crate::window::dpi(window.hwnd) as f32 / 96.0;
     window.pixels.set(pixels);
     window.scale.set(scale);
