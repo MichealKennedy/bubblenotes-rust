@@ -48,6 +48,7 @@ mod model;
 mod note_menu;
 mod note_window;
 mod options;
+mod print;
 mod quick_search;
 mod slash;
 mod store;
@@ -138,6 +139,15 @@ pub fn BubbleNotes() -> impl IntoElement {
                     let template = app.save_as_template(&note);
                     app.new_from_template(&template);
                 }
+                // "version": the text as it was at the newest earlier version.
+                "version" => {
+                    if let Some(at) = app.versions(&note).first() {
+                        app.restore_version(&note, *at);
+                    }
+                }
+                "print" => print::print(app, &note),
+                // "pdf:C:\out.pdf": the note saved there as a PDF.
+                dev if dev.starts_with("pdf:") => print::save_pdf_to(app, note.clone(), dev["pdf:".len()..].into()),
                 "unghost" => {
                     for note in app.notes.get_untracked() {
                         app.update(&note, |m| m.ghost = false);

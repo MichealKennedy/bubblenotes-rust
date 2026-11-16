@@ -121,6 +121,23 @@ pub fn format_at(ms: f64) -> String {
     to_local(ms).format(FORMAT).to_string()
 }
 
+/// A past moment in words: "Today 14:32", "Yesterday 09:10",
+/// "Sat 14 Nov 14:32", with the year when it isn't this one.
+pub fn describe_past(ms: f64, now: f64) -> String {
+    describe_past_local(to_local(ms), to_local(now))
+}
+
+fn describe_past_local(at: NaiveDateTime, now: NaiveDateTime) -> String {
+    let days = (now.date() - at.date()).num_days();
+    let time = at.format("%H:%M");
+    match days {
+        0 => format!("Today {time}"),
+        1 => format!("Yesterday {time}"),
+        _ if at.date().year() == now.date().year() => format!("{} {time}", at.format("%a %-d %b")),
+        _ => format!("{} {time}", at.format("%-d %b %Y")),
+    }
+}
+
 /// The moment typed as `yyyy-mm-dd hh:mm` (local time), in milliseconds
 /// since the Unix epoch.
 pub fn parse_at(text: &str) -> Option<f64> {

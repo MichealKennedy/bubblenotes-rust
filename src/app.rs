@@ -393,6 +393,31 @@ impl App {
         }
     }
 
+    /// When the note's earlier versions are from, newest first.
+    pub fn versions(self, note: &Note) -> Vec<f64> {
+        self.vault.get().versions(&note.id)
+    }
+
+    /// Puts back the note's text as it was at `at` (one of `versions`).
+    /// The text it has now is kept as a version first, and the change is
+    /// one step of the note's undo history.
+    pub fn restore_version(self, note: &Note, at: f64) {
+        self.save_text(note);
+        let (vault, kit) = (self.vault.get(), self.kit.get());
+        let meta = note.meta.get_untracked();
+        let restored = vault.read_version(&note.id, at).map_err(|e| e.to_string()).and_then(|html| Format::Html.parse(&kit.schema, &html));
+        match restored {
+            Ok(doc) => {
+                if let Ok(now) = vault.read_body(&meta) {
+                    let _ = vault.keep_version(&note.id, meta.modified, &now, 0.0);
+                }
+                // Its images are where the note's file has them.
+                self.set_doc(note, formats::images_to_absolute(&kit.schema, &doc, &vault.path_of(&meta)));
+            }
+            Err(e) => self.problem.set(Some(format!("Couldn't read the earlier version of “{}”: {e}", meta.title))),
+        }
+    }
+
     /// Moves a note to the trash (it can be restored for a while).
     pub fn trash(self, note: &Note) {
         self.save_text(note);
@@ -468,7 +493,7 @@ impl App {
     }
 
     /// Writes the note when its text differs from its file.
-    fn save_text(self, note: &Note) {
+    pub(crate) fn save_text(self, note: &Note) {
         let changed = !note.saved.with_untracked(|saved| formats::same_content(&note.editor.doc(), saved));
         if changed && note.meta.with_untracked(|m| m.trashed.is_none()) {
             self.write_text(note);

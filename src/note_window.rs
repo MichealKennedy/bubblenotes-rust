@@ -65,6 +65,11 @@ fn attributes(always_on_top: bool, resizable: bool) -> WindowAttributes {
 }
 
 impl App {
+    /// Docks the note to `edge` of the screen it's on, or undocks it.
+    pub fn dock(self, note: &Note, edge: Option<crate::model::Edge>) {
+        self.update(note, |m| m.docked = edge);
+    }
+
     /// Where the other notes on the desktop are (their windows as they
     /// show when not opened from a bubble): what a dragged note snaps to.
     pub fn other_note_windows(self, id: &str) -> Vec<Rect> {

@@ -21,7 +21,7 @@ use nsh_core::prelude::*;
 use crate::alarms;
 use crate::app::{App, Note, NoteCommand};
 use crate::formats::Format;
-use crate::model::{Alarm, Look, NoteMeta, Rect, Theme, builtin_themes};
+use crate::model::{Alarm, Edge, Look, NoteMeta, Rect, Theme, builtin_themes};
 use crate::store;
 
 const MINUTE: f64 = 60_000.0;
@@ -70,6 +70,11 @@ enum Action {
     ShowTitle,
     Lock,
     Ghost,
+    FadeIdle,
+    /// Dock to this edge of the screen (`None`: undock).
+    Dock(Option<Edge>),
+    Print,
+    SavePdf,
     Bubble,
     Duplicate,
     CopyNote,
@@ -90,6 +95,8 @@ enum Action {
     MoveTo(String),
     NewCategory,
     Theme(Look),
+    /// Put back the text as it was then.
+    RestoreVersion(f64),
     Delete,
     Hide,
     Arrange(Arrange),
@@ -150,6 +157,8 @@ struct MenuState<'a> {
     templates: &'a [(String, String)],
     /// The program in front before this note was clicked ("" when unknown).
     front_app: &'a str,
+    /// When the note's earlier versions are from, newest first.
+    versions: &'a [f64],
 }
 
 /// The note's menu, as data.
@@ -183,8 +192,19 @@ fn entries(s: &MenuState) -> Vec<Entry> {
         item("Show Title", Action::ShowTitle).checked(m.look.show_title),
         item("Lock Note", Action::Lock).checked(m.locked),
         item("Ghost (clicks pass through)", Action::Ghost).checked(m.ghost),
+        item("Fade when idle", Action::FadeIdle).checked(m.fade_idle),
         pin,
         item("Show as Bubble", Action::Bubble).checked(m.bubble.enabled),
+        submenu(
+            "Dock to screen edge",
+            vec![
+                item("Left", Action::Dock(Some(Edge::Left))).checked(m.docked == Some(Edge::Left)),
+                item("Right", Action::Dock(Some(Edge::Right))).checked(m.docked == Some(Edge::Right)),
+                item("Top", Action::Dock(Some(Edge::Top))).checked(m.docked == Some(Edge::Top)),
+                Entry::Separator,
+                item("Undock", Action::Dock(None)).disabled(m.docked.is_none()),
+            ],
+        ),
         Entry::Separator,
         item("Duplicate Note", Action::Duplicate).shortcut("mod+d"),
         item("Save as Template", Action::SaveTemplate),
@@ -193,11 +213,14 @@ fn entries(s: &MenuState) -> Vec<Entry> {
         item("Copy text only", Action::CopyText),
         item("Copy as markdown", Action::CopyMarkdown),
         item("Export note to file…", Action::Export),
+        item("Print…", Action::Print),
+        item("Save as PDF…", Action::SavePdf),
         Entry::Separator,
         submenu("Sleep", sleep_entries(m, s.now)),
         submenu("Alarm", alarm_entries(m, s.now)),
         submenu("Move to", category_entries(m, s.categories)),
         submenu("Theme", theme_entries(m, s.user_themes)),
+        submenu("Earlier versions", version_entries(s.versions, s.now)),
         Entry::Separator,
         item("Delete", Action::Delete),
         item("Hide", Action::Hide),
@@ -247,6 +270,18 @@ fn alarm_entries(m: &NoteMeta, now: f64) -> Vec<Entry> {
     if m.alarm.is_some() {
         out.push(item("Clear alarm", Action::AlarmClear));
     }
+    out
+}
+
+/// The versions shown in the menu (the newest ones).
+const VERSIONS_SHOWN: usize = 15;
+
+fn version_entries(versions: &[f64], now: f64) -> Vec<Entry> {
+    if versions.is_empty() {
+        return vec![note_line("None yet: they're kept as you edit")];
+    }
+    let mut out = vec![note_line("Put the text back as it was:"), Entry::Separator];
+    out.extend(versions.iter().take(VERSIONS_SHOWN).map(|&at| item(alarms::describe_past(at, now), Action::RestoreVersion(at))));
     out
 }
 
@@ -325,6 +360,7 @@ pub fn show(app: App, note: &Note) {
         user_themes: &user_themes,
         templates: &templates,
         front_app: &front_app,
+        versions: &app.versions(note),
     };
     let note = note.clone();
     let run: Rc<dyn Fn(Action)> = Rc::new(move |action| perform(app, &note, action));
@@ -358,6 +394,10 @@ fn perform(app: App, note: &Note, action: Action) {
         Action::ShowTitle => app.update(note, |m| m.look.show_title = !m.look.show_title),
         Action::Lock => app.update(note, |m| m.locked = !m.locked),
         Action::Ghost => app.update(note, |m| m.ghost = !m.ghost),
+        Action::FadeIdle => app.update(note, |m| m.fade_idle = !m.fade_idle),
+        Action::Dock(edge) => app.dock(note, edge),
+        Action::Print => crate::print::print(app, note),
+        Action::SavePdf => crate::print::save_pdf(app, note.clone()),
         Action::Bubble => app.update(note, |m| {
             m.bubble.enabled = !m.bubble.enabled;
             // The bubble appears where the note is.
@@ -389,6 +429,7 @@ fn perform(app: App, note: &Note, action: Action) {
         Action::MoveTo(category) => app.update(note, |m| m.category = category),
         Action::NewCategory => global::<NewCategoryFor>().set(NewCategoryFor(Some(id))),
         Action::Theme(look) => app.update(note, |m| m.look = themed(&m.look, &look)),
+        Action::RestoreVersion(at) => app.restore_version(note, at),
         Action::Delete => app.trash(note),
         Action::Hide => app.update(note, |m| m.on_desktop = false),
         Action::Arrange(how) => arrange(app, note, how),
@@ -738,7 +779,7 @@ mod tests {
     use super::*;
 
     fn state<'a>(meta: &'a NoteMeta, categories: &'a [String]) -> MenuState<'a> {
-        MenuState { meta, now: 1_000_000.0, can_paste: false, markdown_shown: false, categories, user_themes: &[], templates: &[], front_app: "" }
+        MenuState { meta, now: 1_000_000.0, can_paste: false, markdown_shown: false, categories, user_themes: &[], templates: &[], front_app: "", versions: &[] }
     }
 
     /// The labels at the top level ("---" for separators, "label >" for
@@ -789,8 +830,10 @@ mod tests {
                 "[x] Show Title",
                 "[ ] Lock Note",
                 "[ ] Ghost (clicks pass through)",
+                "[ ] Fade when idle",
                 "[ ] Show only with a program (off)",
                 "[ ] Show as Bubble",
+                "Dock to screen edge >",
                 "---",
                 "Duplicate Note",
                 "Save as Template",
@@ -799,11 +842,14 @@ mod tests {
                 "Copy text only",
                 "Copy as markdown",
                 "Export note to file…",
+                "Print…",
+                "Save as PDF…",
                 "---",
                 "Sleep >",
                 "Alarm >",
                 "Move to >",
                 "Theme >",
+                "Earlier versions >",
                 "---",
                 "Delete",
                 "Hide",
@@ -820,7 +866,9 @@ mod tests {
         assert_eq!(labels(sub(&menu, "Arrange")), ["Cascade all notes", "Tile all notes", "Stack here", "Snap to nearest corner"]);
         // The shortcut is valid: `MenuItem::shortcut` would panic otherwise.
         let run: Rc<dyn Fn(Action)> = Rc::new(|_| {});
-        assert_eq!(to_menu(menu, &run).len(), 31);
+        assert_eq!(labels(sub(&menu, "Earlier versions")), ["None yet: they're kept as you edit (off)"]);
+        assert_eq!(labels(sub(&menu, "Dock to screen edge")), ["[ ] Left", "[ ] Right", "[ ] Top", "---", "Undock (off)"]);
+        assert_eq!(to_menu(menu, &run).len(), 36);
     }
 
     #[test]

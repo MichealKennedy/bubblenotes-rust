@@ -9,6 +9,7 @@
 //!   attachments/               images of the notes in this folder
 //!   .bubblenotes/index.json    looks, positions, alarms, settings
 //!   .bubblenotes/trash/        deleted notes, for a while
+//!   .bubblenotes/history/<id>/ earlier versions of a note's text
 //! ```
 //!
 //! The folder is the user's: HTML files they add are picked up as notes,
@@ -28,6 +29,13 @@ use crate::model::{Index, NoteMeta};
 const META_DIR: &str = ".bubblenotes";
 const INDEX_FILE: &str = "index.json";
 const TRASH_DIR: &str = "trash";
+const HISTORY_DIR: &str = "history";
+/// A note's text is kept as an earlier version at most this often
+/// (milliseconds): a version is the text as it was before a spell of
+/// editing, not every save.
+pub const VERSION_EVERY: f64 = 10.0 * 60_000.0;
+/// How many earlier versions a note keeps.
+const VERSIONS_KEPT: usize = 40;
 /// Folders that aren't categories.
 const RESERVED_DIRS: &[&str] = &["attachments"];
 
@@ -168,6 +176,12 @@ impl Vault {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
+        // What's about to be replaced stays as an earlier version.
+        if let Ok(old) = self.read_body(meta)
+            && old != body
+        {
+            let _ = self.keep_version(&meta.id, meta.modified, &old, VERSION_EVERY);
+        }
         write_atomic(&path, &document(meta, body))
     }
 
@@ -234,8 +248,69 @@ impl Vault {
         if from.exists() { std::fs::rename(from, to) } else { Ok(()) }
     }
 
-    /// Deletes the note's file for good (wherever it is).
+    // ----- Earlier versions ----------------------------------------------------
+
+    fn history_dir(&self, id: &str) -> PathBuf {
+        self.root.join(META_DIR).join(HISTORY_DIR).join(id)
+    }
+
+    fn version_path(&self, id: &str, at: f64) -> PathBuf {
+        self.history_dir(id).join(format!("{}.html", at as u64))
+    }
+
+    /// When the note's earlier versions are from (each the time its text
+    /// was last changed, in milliseconds since the Unix epoch), newest
+    /// first.
+    pub fn versions(&self, id: &str) -> Vec<f64> {
+        let mut found: Vec<u64> = std::fs::read_dir(self.history_dir(id))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_string_lossy().strip_suffix(".html")?.parse().ok())
+            .collect();
+        found.sort_unstable_by(|a, b| b.cmp(a));
+        found.into_iter().map(|at| at as f64).collect()
+    }
+
+    /// The text of the version from `at`, as the HTML of its body.
+    pub fn read_version(&self, id: &str, at: f64) -> io::Result<String> {
+        std::fs::read_to_string(self.version_path(id, at))
+    }
+
+    /// Keeps `body` as the note's version from `at`, unless one was kept
+    /// less than `every` milliseconds ago (0: always) or the text is
+    /// empty. Only the newest ones stay. Says whether it was kept.
+    pub fn keep_version(&self, id: &str, at: f64, body: &str, every: f64) -> io::Result<bool> {
+        if body.trim().is_empty() || body.trim() == "<p></p>" {
+            return Ok(false);
+        }
+        let versions = self.versions(id);
+        if every > 0.0
+            && let Some(&newest) = versions.first()
+        {
+            // How long ago it was kept is the file's own age: `newest` is
+            // when that text was written, which may be long before.
+            let kept = std::fs::metadata(self.version_path(id, newest)).and_then(|m| m.modified()).ok();
+            let age = kept.and_then(|t| t.elapsed().ok()).map(|d| d.as_millis() as f64);
+            if age.is_none_or(|age| age < every) {
+                return Ok(false);
+            }
+        }
+        if versions.first().is_some_and(|&newest| self.read_version(id, newest).is_ok_and(|text| text == body)) {
+            return Ok(false);
+        }
+        std::fs::create_dir_all(self.history_dir(id))?;
+        write_atomic(&self.version_path(id, at), body)?;
+        for old in self.versions(id).into_iter().skip(VERSIONS_KEPT) {
+            let _ = std::fs::remove_file(self.version_path(id, old));
+        }
+        Ok(true)
+    }
+
+    /// Deletes the note's file for good (wherever it is), and its earlier
+    /// versions.
     pub fn delete_forever(&self, meta: &NoteMeta) -> io::Result<()> {
+        let _ = std::fs::remove_dir_all(self.history_dir(&meta.id));
         match std::fs::remove_file(self.path_of(meta)) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
@@ -410,6 +485,38 @@ mod tests {
         let index = Index { notes: vec![meta.clone()], ..Index::default() };
         vault.save_index(&index).unwrap();
         assert_eq!(vault.load().notes, vec![meta]);
+        std::fs::remove_dir_all(vault.root()).unwrap();
+    }
+
+    #[test]
+    fn replaced_text_stays_as_an_earlier_version() {
+        let vault = temp_vault("history");
+        let mut meta = note(&vault, "Plan", "", "<p>one</p>");
+        assert!(vault.versions(&meta.id).is_empty());
+        meta.modified = 1000.0;
+        vault.write_body(&meta, "<p>two</p>").unwrap();
+        assert_eq!(vault.versions(&meta.id), vec![1000.0]);
+        assert_eq!(vault.read_version(&meta.id, 1000.0).unwrap(), "<p>one</p>");
+        // Soon after, the next save keeps nothing: one version for a spell
+        // of editing.
+        meta.modified = 2000.0;
+        vault.write_body(&meta, "<p>three</p>").unwrap();
+        assert_eq!(vault.versions(&meta.id), vec![1000.0]);
+        // Writing the same text keeps nothing either; asking does, once.
+        assert!(vault.keep_version(&meta.id, 3000.0, "<p>three</p>", 0.0).unwrap());
+        assert!(!vault.keep_version(&meta.id, 4000.0, "<p>three</p>", 0.0).unwrap());
+        assert_eq!(vault.versions(&meta.id), vec![3000.0, 1000.0]);
+        // Only the newest stay.
+        for i in 0..VERSIONS_KEPT + 5 {
+            vault.keep_version(&meta.id, 5000.0 + i as f64, &format!("<p>{i}</p>"), 0.0).unwrap();
+        }
+        assert_eq!(vault.versions(&meta.id).len(), VERSIONS_KEPT);
+        // Versions aren't notes, and go with the note.
+        let index = Index { notes: vec![meta.clone()], ..Index::default() };
+        vault.save_index(&index).unwrap();
+        assert_eq!(vault.load().notes.len(), 1);
+        vault.delete_forever(&meta).unwrap();
+        assert!(vault.versions(&meta.id).is_empty());
         std::fs::remove_dir_all(vault.root()).unwrap();
     }
 

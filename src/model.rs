@@ -170,6 +170,15 @@ pub enum Repeat {
     Yearly,
 }
 
+/// A screen edge a note is docked to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Edge {
+    Left,
+    Right,
+    Top,
+}
+
 /// An alarm: at `at` the note shows itself, with a notification and a sound.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Alarm {
@@ -208,6 +217,14 @@ pub struct NoteMeta {
     /// Shown only while this program is in front (its file name, in lower
     /// case: `chrome.exe`); `None`: always.
     pub pinned_app: Option<String>,
+    /// Mostly see-through (`idle_opacity`) until the pointer is over it or
+    /// it's being typed in.
+    pub fade_idle: bool,
+    /// How solid a faded note is (0 to 1).
+    pub idle_opacity: f32,
+    /// Tucked away at this edge of its screen, as a thin strip that slides
+    /// out into the note under the pointer. `rect` is the note slid out.
+    pub docked: Option<Edge>,
     pub look: Look,
     pub bubble: Bubble,
     /// Hidden until then (milliseconds since the Unix epoch).
@@ -232,6 +249,9 @@ impl Default for NoteMeta {
             locked: false,
             ghost: false,
             pinned_app: None,
+            fade_idle: false,
+            idle_opacity: 0.3,
+            docked: None,
             look: Look::default(),
             bubble: Bubble::default(),
             sleep_until: None,
