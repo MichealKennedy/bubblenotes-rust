@@ -58,6 +58,7 @@ mod system;
 mod toggle;
 mod tray;
 mod ui;
+mod update;
 mod win;
 
 use nsh_core::desktop::WindowAttributes;
@@ -78,6 +79,7 @@ pub fn BubbleNotes() -> impl IntoElement {
     tray::install(app);
     alarms::install(app);
     system::install(app);
+    update::install(app);
     effect(move || drag::set_snap(app.settings.with(|s| s.snap_to_edges)));
     effect(move || app.rescue_notes());
     // The program in front, for the notes pinned to one.
@@ -174,6 +176,17 @@ pub fn BubbleNotes() -> impl IntoElement {
                     let _ = set_timeout(std::time::Duration::from_secs(2), || {
                         // SAFETY: none: this is the fault asked for.
                         unsafe { std::ptr::null_mut::<u32>().write_volatile(1) };
+                    });
+                }
+                // "fetch:<url>": gets the URL and says what came (checking
+                // the network stack by hand).
+                dev if dev.starts_with("fetch:") => {
+                    let url = dev["fetch:".len()..].to_string();
+                    let _ = spawn(async move {
+                        match fetch(url.clone()).await {
+                            Ok(r) => eprintln!("fetch: {url}: status ok={} {} bytes sha256 {}", r.ok(), r.body.len(), nsh_updater::sha256(&r.body)),
+                            Err(e) => eprintln!("fetch: {url}: failed: {e:?}"),
+                        }
                     });
                 }
                 "unghost" => {

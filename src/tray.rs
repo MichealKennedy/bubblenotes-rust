@@ -36,6 +36,12 @@ pub fn install(app: App) {
     effect(move || {
         let shown = app.settings.with(|s| s.notes_shown);
         let ghosts = any_ghost.get();
+        // What updating asks of the user, when it does.
+        let update = match app.update.get() {
+            crate::update::State::Available(offer) => Some(MenuItem::new(format!("Update to {}…", offer.version)).on_select(move || app.install_update())),
+            crate::update::State::Ready(version) => Some(MenuItem::new(format!("Restart to Finish Updating to {version}")).on_select(move || app.restart_to_update())),
+            _ => None,
+        };
         let from_templates: Vec<MenuItem> = templates
             .get()
             .into_iter()
@@ -54,30 +60,38 @@ pub fn install(app: App) {
                 .icon(ImageSrc::svg_markup(ICON_SVG))
                 .tooltip("Bubble Notes")
                 .on_click(move |_| app.update_settings(|s| s.notes_shown = !s.notes_shown))
-                .menu([
-                    MenuItem::new("New Note").on_select(move || {
-                        let note = app.new_note("");
-                        app.show_on_desktop(&note);
-                    }),
-                    MenuItem::submenu("New from Template", from_templates).disabled(no_templates),
-                    MenuItem::new("Search Notes…").on_select(move || app.search_open.set(true)),
-                    MenuItem::separator(),
-                    MenuItem::new("Show All").checked(shown).on_select(move || app.show_all()),
-                    MenuItem::new("Hide All").on_select(move || app.update_settings(|s| s.notes_shown = false)),
-                    MenuItem::new("Make Ghost Notes Solid").disabled(!ghosts).on_select(move || {
-                        for note in app.notes.get_untracked() {
-                            app.update(&note, |m| m.ghost = false);
-                        }
-                    }),
-                    MenuItem::separator(),
-                    MenuItem::new("Notes Manager").on_select(move || app.manager_open.set(true)),
-                    MenuItem::new("Options…").on_select(move || app.options_open.set(true)),
-                    MenuItem::separator(),
-                    MenuItem::new("Exit").on_select(move || {
-                        app.save_now();
-                        quit();
-                    }),
-                ]),
+                .menu({
+                    let mut items = vec![
+                        MenuItem::new("New Note").on_select(move || {
+                            let note = app.new_note("");
+                            app.show_on_desktop(&note);
+                        }),
+                        MenuItem::submenu("New from Template", from_templates).disabled(no_templates),
+                        MenuItem::new("Search Notes…").on_select(move || app.search_open.set(true)),
+                        MenuItem::separator(),
+                        MenuItem::new("Show All").checked(shown).on_select(move || app.show_all()),
+                        MenuItem::new("Hide All").on_select(move || app.update_settings(|s| s.notes_shown = false)),
+                        MenuItem::new("Make Ghost Notes Solid").disabled(!ghosts).on_select(move || {
+                            for note in app.notes.get_untracked() {
+                                app.update(&note, |m| m.ghost = false);
+                            }
+                        }),
+                        MenuItem::separator(),
+                        MenuItem::new("Notes Manager").on_select(move || app.manager_open.set(true)),
+                        MenuItem::new("Options…").on_select(move || app.options_open.set(true)),
+                        MenuItem::separator(),
+                        MenuItem::new("Exit").on_select(move || {
+                            app.save_now();
+                            quit();
+                        }),
+                    ];
+                    if let Some(update) = update {
+                        let at = items.len() - 1;
+                        items.insert(at, update);
+                        items.insert(at + 1, MenuItem::separator());
+                    }
+                    items
+                }),
         );
     });
 }

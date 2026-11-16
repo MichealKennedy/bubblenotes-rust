@@ -1907,15 +1907,19 @@ dependencies = [
 
 [[package]]
 name = "nsh-app-bubblenotes"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
+ "ed25519-dalek",
  "env_logger",
+ "getrandom 0.2.17",
  "nsh-base",
  "nsh-core",
  "nsh-platform-linux",
  "nsh-platform-macos",
  "nsh-platform-windows",
+ "nsh-updater",
  "serde",
  "serde_json",
 ]

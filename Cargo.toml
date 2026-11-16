@@ -1,6 +1,6 @@
 [package]
 name = "nsh-app-bubblenotes"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 # NSH 0.5.1 needs Rust 1.97 or newer (`rustup update stable`).
 rust-version = "1.97"
@@ -12,6 +12,8 @@ publish = false
 nsh-core = "0.5.1"
 # Only the rich-text editor: no code editor, syntax highlighting or JS runtime.
 nsh-base = { version = "0.5.1", default-features = false, features = ["rich-editor", "emoji-picker"] }
+# The rules of updating (the manifest, its signature, the download's hash).
+nsh-updater = "0.5.1"
 env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -19,6 +21,12 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # The desktop backends `cargo run` uses (GTK 4, AppKit, Win32).
+# For the release tool (`examples/release.rs`).
+[dev-dependencies]
+ed25519-dalek = "2.2"
+base64 = "0.22"
+getrandom = "0.2"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 nsh-platform-linux = { version = "0.5.1", default-features = false, features = ["rich-editor", "emoji-picker"] }
 

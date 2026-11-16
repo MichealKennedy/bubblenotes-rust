@@ -42,6 +42,35 @@ Floating notes for the Windows desktop, built with [NSH](https://nsh.dev), in Ru
   led there) is added to `.bubblenotes/crash.log` in the notes folder, a
   message says so, and the app closes. See `src/crash.rs`.
 
+## Updates
+
+The app updates itself from the releases of its GitHub repository
+(`MichealKennedy/bubblenotes-rust`), by the rules of `nsh-updater`:
+
+- **Looking:** 20 seconds after it starts and then once a day, the app gets
+  the latest release's `latest.json` and its signature. Options has a switch
+  for this ("Check for updates") and a "Check now" button.
+- **Trust:** the manifest must be signed with the release key (its public
+  half is `PUBLIC_KEY` in `src/update.rs`), be for this app and name a newer
+  version; the program file downloaded must have the size and SHA-256 the
+  manifest says. Anything else is refused and nothing is changed.
+- **Installing:** with "Install updates automatically" (on by default) a
+  newer version is put in place of the program's file by itself; else the
+  tray menu and Options offer it. Either way it only starts at the app's
+  next start (Options and the tray menu offer a restart): the app never
+  restarts by itself. Only the program's file is replaced; the old one is
+  renamed aside and removed at the next start.
+- **Releasing:** set the version in `Cargo.toml` and `nsh.json`, then run
+  `.
+elease.ps1 "What changed."` and publish the three files it writes to
+  `dist\` as a GitHub release (it prints the command). The release key is
+  in `~\.bubblenotes
+elease.secret`: keep a backup of it, and never commit
+  it. Without it no release can be made that the apps out there accept.
+- A development run (`BUBBLENOTES_DIR`) never asks GitHub. With
+  `BUBBLENOTES_UPDATE=<url of a latest.json>` it asks there instead (a
+  server on this machine, for testing).
+
 ## Run and test
 
 ```sh
@@ -51,7 +80,7 @@ cargo test
 
 Rust 1.97+ (`rustup update stable`). Windows: Visual Studio Build Tools with the C++ workload. The app is built for Windows; the Linux and macOS backends are declared but untested.
 
-For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize|config|configs|version|print|pdf:<file>|dock:left|dock:right|dock:top|dock:none|managerlater|crash|fault` does that to a note two seconds after start (for checking without the mouse). `BUBBLENOTES_MUTE=1` plays videos without sound.
+For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize|config|configs|version|print|pdf:<file>|dock:left|dock:right|dock:top|dock:none|managerlater|crash|fault|fetch:<url>` does that to a note two seconds after start (for checking without the mouse). `BUBBLENOTES_MUTE=1` plays videos without sound.
 
 ## Code map
 
@@ -65,6 +94,7 @@ For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets 
 | `config_panel.rs` | "Edit configuration", beside a note |
 | `manager.rs` | The Notes Manager window |
 | `tray.rs`, `options.rs`, `quick_search.rs` | The tray icon and its menu; the Options window; the quick search box |
+| `update.rs`, `crash.rs` | Updates from GitHub releases; the crash log |
 | `alarms.rs`, `due.rs`, `system.rs` | Sleep, alarms and reminders; dates typed in the text (`@friday`); global shortcuts and starting with Windows |
 | `print.rs` | Printing a note and saving it as a PDF, through a browser |
 | `editor_view.rs`, `media.rs` | A note's text as an editor element; pasted images and YouTube cards |

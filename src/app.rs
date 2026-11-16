@@ -107,6 +107,8 @@ pub struct App {
     pub ghosts_solid: Signal<bool>,
     /// The last thing that went wrong, for whoever shows it.
     pub problem: Signal<Option<String>>,
+    /// Where updating the app stands (`update`).
+    pub update: Signal<crate::update::State>,
     /// The owner the app's signals and tasks live under.
     pub owner: Owner,
     index_dirty: Signal<bool>,
@@ -143,6 +145,7 @@ impl App {
             foreground_app: signal(String::new()),
             ghosts_solid: signal(false),
             problem: signal(None),
+            update: signal(crate::update::State::Idle),
             owner: Owner::current(),
             index_dirty: signal(false),
             text_changed: signal(0.0),

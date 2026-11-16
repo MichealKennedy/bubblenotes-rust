@@ -33,6 +33,7 @@ pub fn options_window(app: App) -> impl IntoElement {
                         .child(general_card(app))
                         .child(shortcuts_card(app))
                         .child(new_notes_card(app))
+                        .child(updates_card(app))
                         .child(about()),
                 ),
             )
@@ -165,6 +166,70 @@ fn new_notes_card(app: App) -> impl IntoElement {
             move || settings.with(|s| s.default_look.clone()),
             move |look| app.update_settings(|s| s.default_look = look),
         )),
+    )
+}
+
+/// Updates: the version, where updating stands and the button for what
+/// can be done next, and the two settings.
+fn updates_card(app: App) -> impl IntoElement {
+    use crate::update::State;
+    let settings = app.settings;
+    let state = app.update;
+    let words = move || {
+        let said = state.with(State::describe);
+        if said.is_empty() { concat!("This is version ", env!("CARGO_PKG_VERSION"), ".").to_string() } else { said }
+    };
+    let label = move || {
+        match state.get() {
+            State::Available(_) => "Update now",
+            State::Ready(_) => "Restart now",
+            State::Checking | State::Downloading(_) => "Working…",
+            _ => "Check now",
+        }
+        .to_string()
+    };
+    let press = move || match state.get_untracked() {
+        State::Available(_) => app.install_update(),
+        State::Ready(_) => app.restart_to_update(),
+        State::Checking | State::Downloading(_) => {}
+        _ => app.check_for_updates(true),
+    };
+    card(
+        "UPDATES",
+        view()
+            .child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .min_h(px(32.0))
+                    .child(
+                        text(words)
+                            .flex_1()
+                            .text_size(px(13.0))
+                            .text_color(move || if matches!(state.get(), State::Failed(_)) { theme().destructive } else { theme().foreground }),
+                    )
+                    .child(small_button(label, press)),
+            )
+            .child(
+                text(move || state.with(|s| match s {
+                    State::Available(offer) | State::Downloading(offer) => offer.notes.clone().unwrap_or_default(),
+                    _ => String::new(),
+                }))
+                .style_when(move || !matches!(state.get(), State::Available(o) | State::Downloading(o) if o.notes.is_some()), |s| s.hidden())
+                .text_size(px(12.0))
+                .text_color(move || theme().muted_foreground),
+            )
+            .child(switch_row("Check for updates", move || settings.with(|s| s.check_updates), move |on| app.update_settings(|s| s.check_updates = on)))
+            .child(
+                view()
+                    .style_when(move || !settings.with(|s| s.check_updates), |s| s.opacity(0.45))
+                    .child(switch_row("Install updates automatically", move || settings.with(|s| s.auto_update), move |on| {
+                        app.update_settings(|s| s.auto_update = on)
+                    })),
+            )
+            .child(hint("An update is put in place quietly and starts the next time the app does. Nothing restarts by itself.")),
     )
 }
 

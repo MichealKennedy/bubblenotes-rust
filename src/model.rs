@@ -331,6 +331,12 @@ pub struct Settings {
     /// How dark selected text's background is, in percent of the text's
     /// colour.
     pub selection_strength: u32,
+    /// The app looks for a newer version of itself (at its start, then
+    /// once a day).
+    pub check_updates: bool,
+    /// A newer version found is installed by itself (it runs from the next
+    /// start); else the user is told and installs it.
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -349,6 +355,8 @@ impl Default for Settings {
             trash_days: 30,
             snap_to_edges: true,
             selection_strength: 35,
+            check_updates: true,
+            auto_update: true,
         }
     }
 }
