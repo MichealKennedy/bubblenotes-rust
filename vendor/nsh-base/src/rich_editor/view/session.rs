@@ -289,6 +289,9 @@ struct Shared {
     composing: AtomicBool,
     focused: AtomicBool,
     editable: AtomicBool,
+    /// BUBBLENOTES PATCH: how far the session's view is scrolled (an
+    /// `f32`'s bits), kept here so a new view of it starts there.
+    scroll_top: std::sync::atomic::AtomicU32,
 }
 
 /// The one live editor a `RichEditor` view and the app's code share:
@@ -329,6 +332,7 @@ impl EditorSession {
             composing: AtomicBool::new(false),
             focused: AtomicBool::new(false),
             editable: AtomicBool::new(true),
+            scroll_top: std::sync::atomic::AtomicU32::new(0),
         }))
     }
 
@@ -485,6 +489,19 @@ impl EditorSession {
                 }
             }
         }
+    }
+
+    /// BUBBLENOTES PATCH: how far down the session's view is scrolled, in
+    /// points. A view keeps it as it scrolls, and a new view of the
+    /// session starts scrolled there.
+    pub fn scroll_top(&self) -> f32 {
+        f32::from_bits(self.0.scroll_top.load(Ordering::Relaxed))
+    }
+
+    /// BUBBLENOTES PATCH: where the next view of the session starts
+    /// scrolled to (a view already showing isn't moved).
+    pub fn set_scroll_top(&self, top: f32) {
+        self.0.scroll_top.store(top.max(0.0).to_bits(), Ordering::Relaxed);
     }
 
     /// Whether a view of the session has the keyboard focus.

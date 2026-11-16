@@ -120,6 +120,11 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
                     .on_scroll(move |e: &ScrollEvent| {
                         scroll_rv.scroll_y.set(e.offset.y);
                         scroll_rv.scrolled.set(e.offset.y);
+                        // BUBBLENOTES PATCH: the session keeps the place
+                        // (not the start a view is at before it's put back).
+                        if scroll_rv.restore_scroll.get().is_none() {
+                            scroll_rv.session.set_scroll_top(e.offset.y.0);
+                        }
                         scroll_rv.viewport.set(e.size);
                     })
                     .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))

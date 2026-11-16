@@ -232,6 +232,9 @@ pub struct NoteMeta {
     pub alarm: Option<Alarm>,
     /// When it was deleted; it stays in the trash for a while.
     pub trashed: Option<f64>,
+    /// How far down its text is scrolled, in points: where it is when the
+    /// note is shown again.
+    pub scroll: f32,
 }
 
 impl Default for NoteMeta {
@@ -257,6 +260,7 @@ impl Default for NoteMeta {
             sleep_until: None,
             alarm: None,
             trashed: None,
+            scroll: 0.0,
         }
     }
 }

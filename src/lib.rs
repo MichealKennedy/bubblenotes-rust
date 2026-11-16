@@ -133,6 +133,20 @@ pub fn BubbleNotes() -> impl IntoElement {
                         let _ = set_timeout(std::time::Duration::from_secs(2 * i as u64), move || app.config_for.set(id.clone()));
                     }
                 }
+                // "reopen": the caret put two thirds down the text (the note
+                // scrolls there), the note hidden four seconds on and shown
+                // again three seconds after (where it's scrolled to is kept).
+                "reopen" => {
+                    let state = note.editor.state();
+                    let pos = state.doc().content().size() * 2 / 3;
+                    let mut tr = state.tr();
+                    tr.set_selection(nsh_base::rich_editor::state::TextSelection::create(state.doc(), pos, None));
+                    tr.scroll_into_view();
+                    let _ = note.editor.session.dispatch(tr);
+                    let (hide, show) = (note.clone(), note.clone());
+                    let _ = set_timeout(std::time::Duration::from_secs(4), move || app.update(&hide, |m| m.on_desktop = false));
+                    let _ = set_timeout(std::time::Duration::from_secs(7), move || app.show_on_desktop(&show));
+                }
                 "autosize" => app.command.set(Some((note.id.clone(), app::NoteCommand::AutoSize))),
                 // "newin:Work/Ideas": a new note in that category.
                 dev if dev.starts_with("newin:") => {

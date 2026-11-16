@@ -188,6 +188,13 @@ impl App {
             if changed > 0.0 && now - changed >= SAVE_AFTER {
                 app.save_texts();
             }
+            // Where each note is scrolled to is kept with it.
+            for note in app.notes.get_untracked() {
+                let top = note.editor.session.scroll_top().round();
+                if note.meta.with_untracked(|m| m.scroll != top) {
+                    app.update(&note, |m| m.scroll = top);
+                }
+            }
             if app.index_dirty.get_untracked() {
                 app.save_index();
             }
@@ -206,6 +213,7 @@ impl App {
             .and_then(|html| Format::Html.parse(&kit.schema, &html).ok())
             .map(|doc| formats::images_to_absolute(&kit.schema, &doc, &file));
         let editor = kit.editor(doc);
+        editor.session.set_scroll_top(meta.scroll);
         self.owner.run(|| Note { id: Rc::from(meta.id.as_str()), saved: signal(editor.doc()), meta: signal(meta), editor })
     }
 

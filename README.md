@@ -87,7 +87,7 @@ cargo test
 
 Rust 1.97+ (`rustup update stable`). Windows: Visual Studio Build Tools with the C++ workload. The app is built for Windows; the Linux and macOS backends are declared but untested.
 
-For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize|config|configs|version|print|pdf:<file>|dock:left|dock:right|dock:top|dock:none|managerlater|crash|fault|fetch:<url>` does that to a note two seconds after start (for checking without the mouse). `BUBBLENOTES_MUTE=1` plays videos without sound.
+For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize|config|configs|version|print|pdf:<file>|dock:left|dock:right|dock:top|dock:none|managerlater|reopen|crash|fault|fetch:<url>` does that to a note two seconds after start (for checking without the mouse). `BUBBLENOTES_MUTE=1` plays videos without sound.
 
 ## Code map
 
@@ -141,6 +141,11 @@ for `BUBBLENOTES PATCH`:
   or top edge, it lays out first and moves in step with the screen's
   frames. Without them a note resized by an edge showed its far corners
   square, or jumping, for a frame.
+- `vendor/nsh-base/src/rich_editor/view/` (`session.rs`, `controller.rs`,
+  `render.rs`): an editor session remembers how far its view is scrolled
+  (`EditorSession::scroll_top`), and a new view of it starts there. Without
+  it a note shown again (hidden and shown, its bubble opened, the app
+  started) was back at its top.
 
 When NSH is upgraded: copy the new crates over these and apply the same
 changes again, or drop the copies and the `[patch.crates-io]` section if NSH

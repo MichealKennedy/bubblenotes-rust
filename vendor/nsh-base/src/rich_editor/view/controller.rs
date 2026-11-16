@@ -193,6 +193,9 @@ pub(crate) struct Rv {
     autoscroll: Rc<RefCell<AutoScroll>>,
     /// The state's scroll request was not carried out yet.
     scroll_pending: Rc<Cell<bool>>,
+    /// BUBBLENOTES PATCH: where the view is still to be scrolled to, as
+    /// the session's last view was (`EditorSession::scroll_top`).
+    pub(crate) restore_scroll: Rc<Cell<Option<Points>>>,
     blink_task: Rc<RefCell<Option<Spawned<()>>>>,
     base_keymap: Rc<Keymap>,
     /// A press on a table's handle or grip being dragged.
@@ -215,6 +218,8 @@ impl Rv {
             .unwrap_or_default();
         let rv = Rv {
             node_views: Rc::new(RefCell::new(session.node_views())),
+            // (BUBBLENOTES PATCH: `restore_scroll`, before the session is moved in.)
+            restore_scroll: Rc::new(Cell::new(Some(px(session.scroll_top())).filter(|top| *top > px(0.5)))),
             session,
             props,
             cx,
@@ -354,6 +359,29 @@ impl Rv {
                 spawn(async move { rv.focus() });
             }
         });
+        // BUBBLENOTES PATCH: scrolls to where the session's last view was,
+        // once the content is laid out tall enough to be there; half a
+        // second on (the text is shorter now, say) as near as it gets.
+        if self.restore_scroll.get().is_some() {
+            let rv = self.clone();
+            effect(move || {
+                let (content, viewport) = (rv.content_height.get(), rv.viewport.get().height);
+                if let Some(top) = rv.restore_scroll.get()
+                    && viewport > px(0.0)
+                    && content - viewport >= top
+                {
+                    rv.restore_scroll.set(None);
+                    rv.scroll.scroll_to(Point::new(px(0.0), top), false);
+                }
+            });
+            let rv = self.clone();
+            let _ = set_timeout(Duration::from_millis(500), move || {
+                if let Some(top) = rv.restore_scroll.take() {
+                    let most = (rv.content_height.get_untracked() - rv.viewport.get_untracked().height).max(px(0.0));
+                    rv.scroll.scroll_to(Point::new(px(0.0), top.min(most)), false);
+                }
+            });
+        }
         // Scrolls the selection into view once its place is known.
         let rv = self.clone();
         effect(move || {
