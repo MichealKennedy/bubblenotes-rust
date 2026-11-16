@@ -5,14 +5,14 @@ Floating notes for the Windows desktop, built with [NSH](https://nsh.dev), in Ru
 ## Features
 
 - **Floating notes:** rounded, frameless, any colour or gradient, see-through backgrounds. Drag the title to move (snaps to screen edges), the corner grip to resize, double-click the title to roll a note up
-- **Right-click menu** on every note: always on top, lock, show title, sleep, alarm, move to a category, theme, duplicate, copy and paste, copy as Markdown, export, arrange
+- **Right-click menu** on every note: always on top, lock, show title, sleep, alarm, move to a category, theme, earlier versions, duplicate, copy and paste, copy as Markdown, export, print, save as PDF, arrange
 - **Edit configuration:** a panel beside the note with its colours, text and title styling, transparency, sleep, alarm and bubble settings. Changes apply at once
 - **Bubbles:** a note can show as a small bubble (glossy sphere, circle, square, triangle or an emoji) that opens into the note on hover or click, to any side
 - **Sleep and alarms:** a sleeping note hides until its time; an alarm shows the note with a notification and a sound, and can repeat
 - **Notes Manager:** category tree, full-text search, trash, the full formatting toolbar
 - **Tray icon:** click to show or hide all notes; right-click for New Note, Show All, Hide All, Notes Manager, Options, Exit
 - **Rich text:** type `/` for headings, checklists, toggles, tables and more; select text to format it; Markdown shortcuts as you type
-- **Images and YouTube:** paste or drop images into a note; a pasted YouTube link becomes a card that opens the video in your browser
+- **Images and YouTube:** paste or drop images into a note; a pasted YouTube link becomes a card that plays the video in the note (↗ opens it in your browser)
 - **Links between notes:** type `[[` to pick a note (or `[[Name]]` in full); the link shows the note's current title and opens it on a click
 - **Bubble badges:** a bubble shows the time to its note's alarm, or how many checklist items are done
 - **Snapping and rescue:** dragged notes snap to screen edges and to each other; notes left on an unplugged monitor come back
@@ -21,11 +21,16 @@ Floating notes for the Windows desktop, built with [NSH](https://nsh.dev), in Ru
 - **Templates:** "Save as Template" keeps a copy of a note in the Templates category; "New from Template" (tray and note menus) starts a note from one
 - **Pin to a program:** "Show only with …" in a note's menu shows the note only while that program is in front
 - **Colour by category:** right-click a category in the Notes Manager to choose the colour its new notes get (subcategories follow)
+- **Earlier versions:** a note's text is kept as it was before each spell of editing (at most one version every 10 minutes, the newest 40); "Earlier versions" in a note's menu puts one back, keeping the current text as a version too
+- **Dates and reminders:** type `@friday`, `@tomorrow 3pm`, `@20 nov` or `@in 2h` and it becomes a date; when it comes, the app reminds of that line, unless it's a ticked checklist item
+- **Fade when idle:** a note goes see-through until the pointer is over it or it's being typed in
+- **Dock to a screen edge:** drag a note until the pointer touches the left, right or top edge of the screen (or use its menu): it tucks away as a strip there and slides out under the pointer. Drag it away to undock
+- **Print and PDF:** "Print…" opens the note in your browser with its print dialog; "Save as PDF…" writes a PDF (using Edge or Chrome, without showing them)
 - **Global shortcuts:** new note (Ctrl+Alt+N), new note from the clipboard (Ctrl+Alt+V), show or hide all notes (Ctrl+Alt+H), search (Ctrl+Alt+F); change them in Options
 
 ## Where notes are kept
 
-`Documents/Bubble Notes`: one HTML file per note, a folder per category, images in `attachments/`. Notes save as you type. HTML files you add to the folder become notes; `.bubblenotes/index.json` holds looks, positions, alarms and settings, and `.bubblenotes/trash/` holds deleted notes for 30 days.
+`Documents/Bubble Notes`: one HTML file per note, a folder per category, images in `attachments/`. Notes save as you type. HTML files you add to the folder become notes; `.bubblenotes/index.json` holds looks, positions, alarms and settings, `.bubblenotes/trash/` holds deleted notes for 30 days, and `.bubblenotes/history/` holds each note's earlier versions.
 
 ## Run and test
 
@@ -36,7 +41,7 @@ cargo test
 
 Rust 1.97+ (`rustup update stable`). Windows: Visual Studio Build Tools with the C++ workload. The app is built for Windows; the Linux and macOS backends are declared but untested.
 
-For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize|config|configs` does that to a note two seconds after start (for checking without the mouse).
+For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize|config|configs|version|print|pdf:<file>|dock:left|dock:right|dock:top|dock:none|managerlater` does that to a note two seconds after start (for checking without the mouse). `BUBBLENOTES_MUTE=1` plays videos without sound.
 
 ## Code map
 
@@ -50,7 +55,8 @@ For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets 
 | `config_panel.rs` | "Edit configuration", beside a note |
 | `manager.rs` | The Notes Manager window |
 | `tray.rs`, `options.rs`, `quick_search.rs` | The tray icon and its menu; the Options window; the quick search box |
-| `alarms.rs`, `system.rs` | Sleep and alarms; global shortcuts and starting with Windows |
+| `alarms.rs`, `due.rs`, `system.rs` | Sleep, alarms and reminders; dates typed in the text (`@friday`); global shortcuts and starting with Windows |
+| `print.rs` | Printing a note and saving it as a PDF, through a browser |
 | `editor_view.rs`, `media.rs` | A note's text as an editor element; pasted images and YouTube cards |
 | `kit.rs`, `actions.rs`, `toggle.rs`, `slash.rs`, `formats.rs`, `ui.rs` | The editor: schema and plugins, the action catalog, toggle blocks, the slash menu, Markdown/HTML, toolbar and menus |
 | `links.rs` | Links between notes: the `[[` menu and the link in the text |
@@ -62,7 +68,9 @@ For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets 
 - **Note windows are see-through**, which rules out a system shadow and click-through: a window's bounds are always exactly what's visible
 - **Notes are dragged by the app, not the system** (`drag.rs`): a system drag region swallows clicks, and this way double-click rolls a note up and the configuration panel follows along
 - **One editor session per note**, shown by both the floating note and the manager, so they always agree
-- **No video inside notes:** NSH 0.5.1's web view draws only in the main window, so YouTube links open in the browser
+- **Video inside notes** is YouTube's player in a web view (WebView2), made when a card's picture is pressed. Its page is given a web address of its own: the player refuses to play in a page without one
+- **NSH's word on a window's focus and bounds comes late.** What must know now (fading, docking, a bubble's place) asks Windows (`win.rs`) or goes by where the app itself put the window
+- **A list item may start with a toggle**: the starter kit's items must start with a paragraph, so `kit.rs` replaces the two item types with ones that needn't
 - **Ghost notes go around NSH:** it refuses click-through windows to Rust apps, so `win.rs` sets the window style itself and sets it again after NSH resets it
 - **Right-click menus are native**: a drawn menu would be clipped by a small note's window
 

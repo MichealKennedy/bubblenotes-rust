@@ -215,6 +215,21 @@ fn thumbnail_url(id: &str) -> String {
     format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg")
 }
 
+/// The page a card plays its video in: YouTube's player, filling it. The
+/// page is given a web address of its own (`PLAYER_BASE`): YouTube's player
+/// refuses to play in a page without one.
+fn player_page(id: &str, start: Option<u32>) -> String {
+    let start = start.filter(|s| *s > 0).map(|s| format!("&start={s}")).unwrap_or_default();
+    // (For checking by hand without sound.)
+    let mute = if std::env::var_os("BUBBLENOTES_MUTE").is_some() { "&mute=1" } else { "" };
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="strict-origin-when-cross-origin"><style>html,body{{margin:0;height:100%;background:#000;overflow:hidden}}iframe{{position:absolute;inset:0;width:100%;height:100%;border:0}}</style></head><body><iframe src="https://www.youtube-nocookie.com/embed/{id}?autoplay=1&playsinline=1&rel=0{start}{mute}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>"#
+    )
+}
+
+/// The address the player's page is given.
+const PLAYER_BASE: &str = "https://bubblenotes.app/player/";
+
 /// YouTube's description of a video (its title), as JSON.
 fn oembed_url(url: &str) -> String {
     let encoded: String = url
@@ -560,8 +575,10 @@ const PLAY_ICON: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 
 const SMALL_ICON: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 68 48"><path d="M66.5 7.7a8.5 8.5 0 0 0-6-6C55.2.3 34 .3 34 .3s-21.2 0-26.5 1.4a8.5 8.5 0 0 0-6 6C.1 13 .1 24 .1 24s0 11 1.4 16.3a8.5 8.5 0 0 0 6 6C12.8 47.7 34 47.7 34 47.7s21.2 0 26.5-1.4a8.5 8.5 0 0 0 6-6C67.9 35 67.9 24 67.9 24s0-11-1.4-16.3z" fill="#ff0033"/><path d="M45 24 27 14v20z" fill="#fff"/></svg>"##;
 
-/// A card: the thumbnail with a play button (a press opens the video),
-/// the title under it. Pressing the title strip only selects the card.
+/// A card: the thumbnail with a play button, the title under it. A press
+/// on the thumbnail plays the video there (YouTube's player in a web view,
+/// made only then); "Stop" brings the thumbnail back and ↗ opens the video
+/// in the browser. Pressing the title only selects the card.
 struct YoutubeView;
 
 impl NodeView for YoutubeView {
@@ -607,7 +624,9 @@ impl NodeView for YoutubeView {
             cleanup(move || end_fetch(&session, &id));
         }
 
-        let open = url;
+        let open = url.clone();
+        // The video plays in the card once its picture is pressed.
+        let playing = signal(false);
         let shown_title = move || {
             let t = title();
             if t.is_empty() { "YouTube video".to_string() } else { t }
@@ -622,25 +641,23 @@ impl NodeView for YoutubeView {
             .bg(move || theme().card)
             .shadow_sm()
             .child(
-                view()
-                    .relative()
-                    .w_full()
-                    .aspect_ratio(16.0 / 9.0)
-                    .bg(nsh_core::Color(0x000000ff))
-                    .cursor(Cursor::Pointer)
-                    .label("Play on YouTube")
-                    .on_press(move || {
-                        let _ = open_url(open());
-                    })
-                    .child(image(thumbnail_url(&id())).absolute().inset_0().object_fit(ResizeMode::Cover))
-                    .child(
+                view().relative().w_full().aspect_ratio(16.0 / 9.0).bg(nsh_core::Color(0x000000ff)).child(dynamic(move || {
+                    let (id, url) = (id(), url());
+                    if playing.get() {
+                        let start = youtube_id(&url).and_then(|(_, start)| start);
+                        web_view_html(player_page(&id, start), Some(PLAYER_BASE)).absolute().inset_0().scrollable(false).into_element()
+                    } else {
                         view()
                             .absolute()
                             .inset_0()
-                            .items_center()
-                            .justify_center()
-                            .child(svg(ImageSrc::svg_markup(PLAY_ICON)).w(px(56.0)).h(px(40.0))),
-                    ),
+                            .cursor(Cursor::Pointer)
+                            .label("Play the video")
+                            .on_press(move || playing.set(true))
+                            .child(image(thumbnail_url(&id)).absolute().inset_0().object_fit(ResizeMode::Cover))
+                            .child(view().absolute().inset_0().items_center().justify_center().child(svg(ImageSrc::svg_markup(PLAY_ICON)).w(px(56.0)).h(px(40.0))))
+                            .into_element()
+                    }
+                })),
             )
             .child(
                 view()
@@ -657,6 +674,31 @@ impl NodeView for YoutubeView {
                             .text_size(px(13.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(move || theme().card_foreground),
+                    )
+                    .child(
+                        text("Stop")
+                            .style_when(move || !playing.get(), |s| s.hidden())
+                            .px_2()
+                            .rounded(px(6.0))
+                            .text_size(px(12.0))
+                            .text_color(move || theme().muted_foreground)
+                            .hover(|s| s.bg(nsh_core::Color(0x00000018)))
+                            .cursor(Cursor::Pointer)
+                            .label("Stop the video")
+                            .on_press(move || playing.set(false)),
+                    )
+                    .child(
+                        text("↗")
+                            .px(px(6.0))
+                            .rounded(px(6.0))
+                            .text_size(px(13.0))
+                            .text_color(move || theme().muted_foreground)
+                            .hover(|s| s.bg(nsh_core::Color(0x00000018)))
+                            .cursor(Cursor::Pointer)
+                            .label("Open on YouTube in the browser")
+                            .on_press(move || {
+                                let _ = open_url(open());
+                            }),
                     ),
             )
             .into_element()
