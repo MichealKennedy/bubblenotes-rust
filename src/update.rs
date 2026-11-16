@@ -360,11 +360,12 @@ impl App {
                     Ok(Some(mut offer)) => {
                         eprintln!("update: version {} is available", offer.version);
                         offer.held = std::env::current_exe().ok().and_then(|program| held(&program)).as_deref() == Some(offer.version.as_str());
-                        let (version, by_itself) = (offer.version.clone(), app.settings.with_untracked(|s| s.auto_update) && !offer.held);
+                        let (version, held) = (offer.version.clone(), offer.held);
+                        let by_itself = app.settings.with_untracked(|s| s.auto_update) && !held;
                         app.update.set(State::Available(offer));
                         if by_itself {
-                            app.get_update(true);
-                        } else if !asked && app.settings.with_untracked(|s| s.update_told != version) {
+                            app.get_update(!asked);
+                        } else if !asked && !held && app.settings.with_untracked(|s| s.update_told != version) {
                             // (Said once for a version, not at every look.)
                             app.update_settings(|s| s.update_told = version.clone());
                             tell(app, format!("Bubble Notes {version} is available"), "Install it from the tray icon's menu, or in Options.");
