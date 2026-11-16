@@ -29,7 +29,7 @@ use nsh_core::prelude::*;
 use crate::alarms;
 use crate::app::{App, Note};
 use crate::model::{Alarm, BubbleDirection, BubbleOpenOn, BubbleShape, Look, NoteMeta, Rect, Repeat, Rgb, Theme, builtin_themes};
-use crate::note_window::{color, shape_rect};
+use crate::note_window::color;
 
 const PANEL_WIDTH: f32 = 300.0;
 const PANEL_HEIGHT: f32 = 560.0;
@@ -113,7 +113,7 @@ pub fn config_window(app: App) -> impl IntoElement {
     // made, and one opened elsewhere and then moved shows there for a moment.
     dynamic(move || {
         let note = target.get().and_then(|id| untracked(|| app.note(&id)))?;
-        let (x, y, w, h) = untracked(|| frame_beside(note.meta.with(|m| shape_rect(m, false))));
+        let (x, y, w, h) = untracked(|| frame_beside(note.meta.with(crate::note_window::rest_rect)));
         Some(config_window_at(app, x, y, w, h))
     })
 }
@@ -141,7 +141,7 @@ fn config_window_at(app: App, x: f32, y: f32, w: f32, h: f32) -> impl IntoElemen
                     return;
                 }
                 let Some(note) = app.config_for.get().and_then(|id| app.note(&id)) else { return };
-                let mut anchor = note.meta.with(|m| shape_rect(m, false));
+                let mut anchor = note.meta.with(crate::note_window::rest_rect);
                 if let Some((id, x, y)) = app.dragging.get()
                     && id == note.id
                 {

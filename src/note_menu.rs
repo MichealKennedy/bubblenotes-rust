@@ -411,6 +411,9 @@ fn perform(app: App, note: &Note, action: Action) {
         Action::SavePdf => crate::print::save_pdf(app, note.clone()),
         Action::Bubble => app.update(note, |m| {
             m.bubble.enabled = !m.bubble.enabled;
+            if m.bubble.enabled {
+                m.docked = None;
+            }
             // The bubble appears where the note is.
             if m.bubble.enabled {
                 m.bubble.x = m.rect.x;

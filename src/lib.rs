@@ -149,6 +149,21 @@ pub fn BubbleNotes() -> impl IntoElement {
                 "print" => print::print(app, &note),
                 // "pdf:C:\out.pdf": the note saved there as a PDF.
                 dev if dev.starts_with("pdf:") => print::save_pdf_to(app, note.clone(), dev["pdf:".len()..].into()),
+                // "dock:left", "dock:right", "dock:top", "dock:none".
+                dev if dev.starts_with("dock:") => {
+                    let edge = match &dev["dock:".len()..] {
+                        "left" => Some(model::Edge::Left),
+                        "right" => Some(model::Edge::Right),
+                        "top" => Some(model::Edge::Top),
+                        _ => None,
+                    };
+                    app.dock(&note, edge);
+                }
+                // "managerlater": the Notes Manager opens (and takes the
+                // focus from the note) four seconds on.
+                "managerlater" => {
+                    let _ = set_timeout(std::time::Duration::from_secs(8), move || app.manager_open.set(true));
+                }
                 "unghost" => {
                     for note in app.notes.get_untracked() {
                         app.update(&note, |m| m.ghost = false);
