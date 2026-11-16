@@ -227,8 +227,10 @@ fn player_page(id: &str, start: Option<u32>) -> String {
     )
 }
 
-/// The address the player's page is given.
-const PLAYER_BASE: &str = "https://bubblenotes.app/player/";
+/// The address the player's page is given. It's never fetched (the page is
+/// handed over as text), and `.localhost` is nobody's domain: YouTube is
+/// told the video plays there.
+const PLAYER_BASE: &str = "https://bubblenotes.localhost/player/";
 
 /// YouTube's description of a video (its title), as JSON.
 fn oembed_url(url: &str) -> String {
@@ -652,7 +654,18 @@ impl NodeView for YoutubeView {
                             .inset_0()
                             .cursor(Cursor::Pointer)
                             .label("Play the video")
-                            .on_press(move || playing.set(true))
+                            .on_press(move || {
+                                // Where there's nothing to play it in (no
+                                // WebView2), the browser plays it.
+                                let url = url.clone();
+                                let _ = spawn(async move {
+                                    if web_view_available().await {
+                                        playing.set(true);
+                                    } else {
+                                        let _ = open_url(url);
+                                    }
+                                });
+                            })
                             .child(image(thumbnail_url(&id)).absolute().inset_0().object_fit(ResizeMode::Cover))
                             .child(view().absolute().inset_0().items_center().justify_center().child(svg(ImageSrc::svg_markup(PLAY_ICON)).w(px(56.0)).h(px(40.0))))
                             .into_element()

@@ -94,6 +94,10 @@ impl Vault {
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
+        // An id that can't be one (the index was edited by hand) is replaced.
+        for note in index.notes.iter_mut().filter(|n| !valid_id(&n.id)) {
+            note.id = new_id();
+        }
         let mut on_disk = Vec::new();
         self.scan(&self.root, "", &mut on_disk);
 
@@ -262,6 +266,9 @@ impl Vault {
     /// was last changed, in milliseconds since the Unix epoch), newest
     /// first.
     pub fn versions(&self, id: &str) -> Vec<f64> {
+        if !valid_id(id) {
+            return Vec::new();
+        }
         let mut found: Vec<u64> = std::fs::read_dir(self.history_dir(id))
             .into_iter()
             .flatten()
@@ -281,7 +288,7 @@ impl Vault {
     /// less than `every` milliseconds ago (0: always) or the text is
     /// empty. Only the newest ones stay. Says whether it was kept.
     pub fn keep_version(&self, id: &str, at: f64, body: &str, every: f64) -> io::Result<bool> {
-        if body.trim().is_empty() || body.trim() == "<p></p>" {
+        if !valid_id(id) || body.trim().is_empty() || body.trim() == "<p></p>" {
             return Ok(false);
         }
         let versions = self.versions(id);
@@ -310,7 +317,9 @@ impl Vault {
     /// Deletes the note's file for good (wherever it is), and its earlier
     /// versions.
     pub fn delete_forever(&self, meta: &NoteMeta) -> io::Result<()> {
-        let _ = std::fs::remove_dir_all(self.history_dir(&meta.id));
+        if valid_id(&meta.id) {
+            let _ = std::fs::remove_dir_all(self.history_dir(&meta.id));
+        }
         match std::fs::remove_file(self.path_of(meta)) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
@@ -437,12 +446,20 @@ fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
+/// Whether `id` can be a note's id: letters, digits, `-` and `_`. An id
+/// names files and folders (the note's in the trash, its earlier
+/// versions), and a file dropped into the notes folder can claim any:
+/// one like `..` must never be taken for a path.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// The id a note file carries.
 fn id_in(text: &str) -> Option<String> {
     let start = text.find(ID_META)? + ID_META.len();
     let end = text[start..].find('"')?;
     let id = &text[start..start + end];
-    (!id.is_empty()).then(|| id.to_string())
+    valid_id(id).then(|| id.to_string())
 }
 
 /// What's inside `<body>` (the whole text of a file without one).
@@ -517,6 +534,31 @@ mod tests {
         assert_eq!(vault.load().notes.len(), 1);
         vault.delete_forever(&meta).unwrap();
         assert!(vault.versions(&meta.id).is_empty());
+        std::fs::remove_dir_all(vault.root()).unwrap();
+    }
+
+    #[test]
+    fn an_id_that_is_a_path_is_never_used_as_one() {
+        let vault = temp_vault("ids");
+        let keep = note(&vault, "Keep", "", "<p>keep</p>");
+        // A file claiming the id "..", and one claiming a path.
+        for (name, id) in [("Evil.html", ".."), ("Worse.html", "..\\..\\x")] {
+            std::fs::write(vault.root().join(name), format!("<html><head>{ID_META}{id}\"></head><body><p>x</p></body></html>")).unwrap();
+        }
+        let index = Index { notes: vec![keep.clone()], ..Index::default() };
+        vault.save_index(&index).unwrap();
+        let loaded = vault.load();
+        assert_eq!(loaded.notes.len(), 3);
+        assert!(loaded.notes.iter().all(|n| valid_id(&n.id)), "{:?}", loaded.notes.iter().map(|n| &n.id).collect::<Vec<_>>());
+        // Even asked directly, such an id touches nothing.
+        let evil = NoteMeta { id: "..".into(), file: "Evil.html".into(), ..NoteMeta::default() };
+        assert!(!vault.keep_version("..", 1.0, "<p>x</p>", 0.0).unwrap());
+        vault.delete_forever(&evil).unwrap();
+        assert!(vault.root().join(META_DIR).join(INDEX_FILE).exists());
+        assert_eq!(vault.read_body(&keep).unwrap(), "<p>keep</p>");
+        // An index edited by hand to hold one gets a new id.
+        std::fs::write(vault.root().join(META_DIR).join(INDEX_FILE), r#"{ "notes": [ { "id": "../..", "title": "Keep", "file": "Keep.html" } ] }"#).unwrap();
+        assert!(vault.load().notes.iter().all(|n| valid_id(&n.id)));
         std::fs::remove_dir_all(vault.root()).unwrap();
     }
 

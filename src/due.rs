@@ -114,17 +114,20 @@ enum Day {
     Date(NaiveDate),
 }
 
-fn parse_day_word(token: &str) -> Option<Day> {
-    if is_word(token, "today") {
+/// The day `token` names. `whole`: only written out in full (`fri`, `tom`
+/// and `sat` are also words and names).
+fn parse_day_word(token: &str, whole: bool) -> Option<Day> {
+    let is = |word: &str| if whole { token == word } else { is_word(token, word) };
+    if is("today") {
         return Some(Day::Today);
     }
-    if is_word(token, "tonight") {
+    if is("tonight") {
         return Some(Day::Tonight);
     }
-    if is_word(token, "tomorrow") || token == "tmr" || token == "tmrw" {
+    if is("tomorrow") || (!whole && (token == "tmr" || token == "tmrw")) {
         return Some(Day::Tomorrow);
     }
-    WEEKDAYS.iter().find(|(name, _)| is_word(token, name)).map(|(_, day)| Day::Weekday(*day))
+    WEEKDAYS.iter().find(|(name, _)| is(name)).map(|(_, day)| Day::Weekday(*day))
 }
 
 fn parse_month(token: &str) -> Option<u32> {
@@ -146,6 +149,11 @@ fn parse_day_number(token: &str) -> Option<u32> {
 /// at 17:00 or in an hour); a time without a day is the next such time; a
 /// weekday is the next one (today's only with a time still to come).
 pub fn parse(text: &str, now: NaiveDateTime) -> Option<NaiveDateTime> {
+    parse_as(text, now, false)
+}
+
+/// As `parse`; with `whole`, a day's name counts only written out in full.
+fn parse_as(text: &str, now: NaiveDateTime, whole: bool) -> Option<NaiveDateTime> {
     let lower = text.trim().to_lowercase();
     let tokens: Vec<&str> = lower.split_whitespace().filter(|t| *t != "at").collect();
     if tokens.is_empty() {
@@ -173,7 +181,7 @@ pub fn parse(text: &str, now: NaiveDateTime) -> Option<NaiveDateTime> {
             if at.replace(found).is_some() {
                 return None;
             }
-        } else if let Some(found) = parse_day_word(token) {
+        } else if let Some(found) = parse_day_word(token, whole) {
             if day.replace(found).is_some() {
                 return None;
             }
@@ -244,7 +252,7 @@ fn may_become_date(text: &str) -> bool {
     let tokens: Vec<&str> = lower.split_whitespace().collect();
     let numberish = |t: &str| !t.is_empty() && t.len() <= 10 && t.chars().next().is_some_and(|c| c.is_ascii_digit()) && t.chars().all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '-');
     let whole = |t: &str| {
-        parse_day_word(t).is_some() || parse_month(t).is_some() || parse_time(t).is_some() || numberish(t) || OTHER_WORDS.contains(&t) || UNITS.iter().any(|(u, _)| *u == t || format!("{u}s") == t)
+        parse_day_word(t, false).is_some() || parse_month(t).is_some() || parse_time(t).is_some() || numberish(t) || OTHER_WORDS.contains(&t) || UNITS.iter().any(|(u, _)| *u == t || format!("{u}s") == t)
     };
     let starts = |t: &str| {
         numberish(t)
@@ -264,9 +272,11 @@ fn may_become_date(text: &str) -> bool {
 
 /// The longest run of words at the start of `text` that's a date, when
 /// what follows it is something else: (its length in `text`, the date).
+/// A day counts here only written out in full: `@tom called` and `@sat
+/// down` are a name and a word, and nobody was asked.
 fn date_before_other_text(text: &str, now: NaiveDateTime) -> Option<(usize, NaiveDateTime)> {
     let ends: Vec<usize> = text.char_indices().filter(|(_, c)| c.is_whitespace()).map(|(i, _)| i).collect();
-    ends.into_iter().rev().find_map(|end| parse(&text[..end], now).map(|at| (text[..end].trim_end().len(), at)))
+    ends.into_iter().rev().find_map(|end| parse_as(&text[..end], now, true).map(|at| (text[..end].trim_end().len(), at)))
 }
 
 /// What the menu offers for what's typed after `@`: what it means, then
@@ -726,6 +736,12 @@ mod tests {
         assert_eq!(taken("tomorrow 3pm x"), Some(("tomorrow 3pm".to_string(), "2026-11-16 15:00".to_string())));
         assert_eq!(taken("3 eggs"), None);
         assert_eq!(taken("john said"), None);
+        // Short forms are taken only from the menu: these are other words.
+        for text in ["tom called", "sat down", "sun is out", "fri call", "mon ami"] {
+            assert_eq!(taken(text), None, "{text}");
+        }
+        assert_eq!(taken("3pm call"), Some(("3pm".to_string(), "2026-11-15 15:00".to_string())));
+        assert_eq!(taken("20 nov call"), Some(("20 nov".to_string(), "2026-11-20 09:00".to_string())));
     }
 
     #[test]

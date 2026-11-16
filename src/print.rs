@@ -99,12 +99,12 @@ pub fn print(app: App, note: &Note) {
     }
 }
 
-/// Opens `path` with the program Windows has for it.
+/// Opens `path` with the program Windows has for it. (Through Explorer,
+/// which takes the path as it is: a shell would read a `&` in a note's
+/// title as the start of another command.)
 #[cfg(windows)]
 fn open_file(path: &Path) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    // No console window (CREATE_NO_WINDOW).
-    std::process::Command::new("cmd").args(["/C", "start", ""]).arg(path).creation_flags(0x0800_0000).spawn().map(|_| ()).map_err(|e| e.to_string())
+    std::process::Command::new("explorer.exe").arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[cfg(not(windows))]

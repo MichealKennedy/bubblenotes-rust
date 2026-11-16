@@ -402,8 +402,7 @@ impl App {
     }
 
     /// Puts back the note's text as it was at `at` (one of `versions`).
-    /// The text it has now is kept as a version first, and the change is
-    /// one step of the note's undo history.
+    /// The text it has now is kept as a version first.
     pub fn restore_version(self, note: &Note, at: f64) {
         self.save_text(note);
         let (vault, kit) = (self.vault.get(), self.kit.get());

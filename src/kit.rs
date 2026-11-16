@@ -310,4 +310,41 @@ mod tests {
         assert!(press_mod("d"));
         assert!(Request::Duplicate.take());
     }
+
+    /// The caret put at `pos` of the editor's document.
+    fn caret(editor: &Editor, pos: usize) {
+        let state = editor.state();
+        let mut tr = state.tr();
+        tr.set_selection(nsh_base::rich_editor::state::TextSelection::create(state.doc(), pos, None));
+        editor.session.dispatch(tr).unwrap();
+    }
+
+    #[test]
+    fn list_items_still_indent_split_and_may_start_with_a_toggle() {
+        let kit = Kit::new(Relay::default());
+        let p = |text: &str| serde_json::json!({ "type": "paragraph", "content": [{ "type": "text", "text": text }] });
+        let item = |text: &str| serde_json::json!({ "type": "listItem", "content": [p(text)] });
+        let doc = kit.schema.node_from_json(&serde_json::json!({ "type": "doc", "content": [{ "type": "bulletList", "content": [item("a"), item("b")] }] })).unwrap();
+        let editor = kit.editor(Some(doc));
+        // In "b" (list 0, item a 1..6, item b 6: paragraph 7, text 8).
+        caret(&editor, 9);
+        // Tab is taken there by a plugin (the list item's keys).
+        let state = editor.state();
+        assert!(state.plugins().iter().any(|p| p.handle_key_down(&state, &KeyEvent::new("Tab"), &mut |_| {})));
+        let name = serde_json::json!({ "name": "listItem" });
+        assert!(editor.can("sinkListItem", &name));
+        assert!(editor.run("sinkListItem", name.clone()));
+        let list = editor.doc().child(0).clone();
+        assert_eq!(list.child_count(), 1, "b is inside a: {}", editor.doc().to_json());
+        assert_eq!(list.child(0).child(1).ty().name(), "bulletList");
+        assert!(editor.run("liftListItem", name));
+        assert_eq!(editor.doc().child(0).child_count(), 2);
+
+        // An item may start with a toggle, in a file and when made there.
+        let html = r#"<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><label><input type="checkbox"><span></span></label><div><details data-toggle="" open=""><summary>Title</summary><div data-toggle-body="" data-open="true"><p>body</p></div></details></div></li></ul>"#;
+        let doc = crate::formats::Format::Html.parse(&kit.schema, html).unwrap();
+        let first = doc.child(0).child(0).child(0).clone();
+        assert_eq!(first.ty().name(), "toggle", "{}", doc.to_json());
+        assert_eq!(crate::formats::html_fragment(&doc).unwrap(), html);
+    }
 }
