@@ -37,6 +37,7 @@ mod app;
 mod bubble;
 mod config_panel;
 mod drag;
+mod due;
 mod editor_view;
 mod formats;
 mod kit;

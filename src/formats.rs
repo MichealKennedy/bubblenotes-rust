@@ -200,6 +200,10 @@ fn cards_as_links(doc: &Node) -> Node {
                 // (Marked with private-use characters, turned into the
                 // brackets once Markdown has escaped the rest.)
                 *child = serde_json::json!({ "type": "text", "text": format!("{LINK_OPEN}{title}{LINK_CLOSE}") });
+            } else if child.get("type").and_then(Value::as_str) == Some("due") {
+                // A date is written as it's typed.
+                let when = child.pointer("/attrs/when").and_then(Value::as_str).unwrap_or_default().to_string();
+                *child = serde_json::json!({ "type": "text", "text": format!("@{when}") });
             } else {
                 walk(child);
             }
@@ -207,7 +211,7 @@ fn cards_as_links(doc: &Node) -> Node {
     }
     let mut found = false;
     doc.descendants(&mut |node, _, _, _| {
-        found |= matches!(node.ty().name(), "youtube" | "noteLink");
+        found |= matches!(node.ty().name(), "youtube" | "noteLink" | "due");
         !found
     });
     if !found {

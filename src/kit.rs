@@ -163,6 +163,7 @@ impl Kit {
             toggle::extension(),
             media::extension(),
             links::extension(),
+            crate::due::extension(),
         ]
         .into_iter()
         .chain(list_items())
@@ -173,7 +174,7 @@ impl Kit {
         // come before the keymap's (which would split the paragraph). A
         // pasted YouTube link becomes a card before Markdown or the link
         // extension take it as text.
-        let mut plugins = vec![slash::plugin(), links::plugin(), media::paste_plugin()];
+        let mut plugins = vec![slash::plugin(), links::plugin(), crate::due::plugin(), media::paste_plugin()];
         plugins.extend(manager.plugins());
         // Markdown pasted as plain text is read as Markdown, and copies put
         // Markdown on the clipboard (the starter kit has the typing rules).
@@ -193,7 +194,7 @@ impl Kit {
         }
         let state = EditorState::create(config).expect("a document of the kit's schema");
         let session = EditorSession::new(state, NodeViews::new());
-        session.set_node_views(links::with_node_views(media::with_node_views(toggle::node_views())));
+        session.set_node_views(crate::due::with_node_views(links::with_node_views(media::with_node_views(toggle::node_views()))));
         let relay = self.relay.clone();
         session.subscribe(Arc::new(move |_| relay.push(AppEvent::Changed)));
         Editor { session, kit: self.clone() }

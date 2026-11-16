@@ -59,20 +59,29 @@ fn tick(app: App, now: f64) {
         } else if sleep_until.is_some_and(|until| until <= now) {
             app.update(&note, |m| m.sleep_until = None);
         }
+        // The dates in its text that have come (looked for every few
+        // seconds: it reads the whole text).
+        if (now / 1000.0) as u64 % 5 == 0 {
+            for reminder in crate::due::reminders(&note.editor.doc(), to_local(now)) {
+                remind(app, &note, reminder);
+            }
+        }
     }
 }
 
-/// Shows the note, tells the user, and sets the alarm's next time.
-fn fire(app: App, note: &Note, alarm: Alarm, now: f64) {
+/// Shows the note and tells the user of the line whose date has come.
+fn remind(app: App, note: &Note, reminder: crate::due::Reminder) {
+    crate::due::mark_reminded(note, reminder.pos);
     app.show_on_desktop(note);
-    app.set_alarm(note, next_alarm(alarm, now));
-    app.command.set(Some((note.id.clone(), NoteCommand::Focus)));
     let beeped = beep();
-
     let title = note.meta.with_untracked(|m| m.title.clone());
-    let text = note.plain_text();
-    let body = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
-    let notification = Notification::new(note.id.to_string(), title, body).silent(beeped);
+    let line = if reminder.line.is_empty() { "Reminder".to_string() } else { reminder.line };
+    eprintln!("reminder: {line} ({title})");
+    notify(app, Notification::new(note.id.to_string(), line, title).silent(beeped));
+}
+
+/// Shows `notification`, asking once to be allowed to.
+fn notify(app: App, notification: Notification) {
     app.owner.run(|| {
         let _ = spawn(async move {
             let mut permission = notification_permission().await;
@@ -87,6 +96,19 @@ fn fire(app: App, note: &Note, alarm: Alarm, now: f64) {
             eprintln!("alarm: notification shown: {shown}");
         });
     });
+}
+
+/// Shows the note, tells the user, and sets the alarm's next time.
+fn fire(app: App, note: &Note, alarm: Alarm, now: f64) {
+    app.show_on_desktop(note);
+    app.set_alarm(note, next_alarm(alarm, now));
+    app.command.set(Some((note.id.clone(), NoteCommand::Focus)));
+    let beeped = beep();
+
+    let title = note.meta.with_untracked(|m| m.title.clone());
+    let text = note.plain_text();
+    let body = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
+    notify(app, Notification::new(note.id.to_string(), title, body).silent(beeped));
 }
 
 /// The alarm after this one fired at `now`, or `None` when it doesn't repeat.
@@ -163,6 +185,16 @@ pub fn monday_morning(now: f64) -> f64 {
 }
 
 // ----- Local time ----------------------------------------------------------------
+
+/// Now, as this machine's local wall-clock time.
+pub fn local_now() -> NaiveDateTime {
+    Local::now().naive_local()
+}
+
+/// `ms` (since the Unix epoch) as local wall-clock time.
+pub fn to_local_time(ms: f64) -> NaiveDateTime {
+    to_local(ms)
+}
 
 /// `ms` as this machine's local wall-clock time.
 fn to_local(ms: f64) -> NaiveDateTime {
