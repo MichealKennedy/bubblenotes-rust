@@ -26,7 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::model::{Index, NoteMeta};
 
-const META_DIR: &str = ".bubblenotes";
+pub(crate) const META_DIR: &str = ".bubblenotes";
 const INDEX_FILE: &str = "index.json";
 const TRASH_DIR: &str = "trash";
 const HISTORY_DIR: &str = "history";
@@ -55,6 +55,9 @@ pub fn new_id() -> String {
     format!("{:011x}{:04x}", now_ms() as u64, n)
 }
 
+/// The folder beside the program's file that makes the app portable.
+pub const PORTABLE_DIR: &str = "Notes";
+
 impl Vault {
     /// The notes folder at `root`, made when it isn't there.
     pub fn open(root: impl Into<PathBuf>) -> io::Result<Self> {
@@ -67,6 +70,21 @@ impl Vault {
     pub fn default_root() -> PathBuf {
         let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default();
         home.join("Documents").join("Bubble Notes")
+    }
+
+    /// The folder beside the program that makes it portable: when there's
+    /// a `Notes` folder next to the program's file, the notes (and with
+    /// them the settings and the crash log) are kept there, so the app can
+    /// be carried on a stick and leaves nothing on the machine.
+    pub fn portable_root() -> Option<PathBuf> {
+        let beside = std::env::current_exe().ok()?.parent()?.join(PORTABLE_DIR);
+        beside.is_dir().then_some(beside)
+    }
+
+    /// The notes folder this run uses: the one named by `BUBBLENOTES_DIR`
+    /// (development), else the portable one, else the default.
+    pub fn chosen_root() -> PathBuf {
+        std::env::var_os("BUBBLENOTES_DIR").map(PathBuf::from).or_else(Self::portable_root).unwrap_or_else(Self::default_root)
     }
 
     pub fn root(&self) -> &Path {

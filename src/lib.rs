@@ -36,6 +36,7 @@ mod alarms;
 mod app;
 mod bubble;
 mod config_panel;
+pub mod crash;
 mod drag;
 mod due;
 mod editor_view;
@@ -163,6 +164,17 @@ pub fn BubbleNotes() -> impl IntoElement {
                 // focus from the note) four seconds on.
                 "managerlater" => {
                     let _ = set_timeout(std::time::Duration::from_secs(8), move || app.manager_open.set(true));
+                }
+                // "crash": the app fails two seconds on (the crash log);
+                // "fault": the same, by a fault in native code.
+                "crash" => {
+                    let _ = set_timeout(std::time::Duration::from_secs(2), || panic!("a test crash (BUBBLENOTES_DEV=crash)"));
+                }
+                "fault" => {
+                    let _ = set_timeout(std::time::Duration::from_secs(2), || {
+                        // SAFETY: none: this is the fault asked for.
+                        unsafe { std::ptr::null_mut::<u32>().write_volatile(1) };
+                    });
                 }
                 "unghost" => {
                     for note in app.notes.get_untracked() {

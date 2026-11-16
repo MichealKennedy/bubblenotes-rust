@@ -14,6 +14,8 @@ use nsh_platform_windows as platform;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn main() -> impl std::process::Termination {
     env_logger::init();
+    // A failure from here on is written to the crash log.
+    nsh_app_bubblenotes::crash::install();
     // The main window is only a host for the tray and the note windows.
     let mut main_window = nsh_core::desktop::MainWindowOptions::default();
     main_window.default_visible = Some(false);

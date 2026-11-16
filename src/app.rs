@@ -120,7 +120,7 @@ impl App {
     pub fn start() -> Self {
         let relay = Relay::default();
         let kit = Kit::new(relay.clone());
-        let root = std::env::var_os("BUBBLENOTES_DIR").map(std::path::PathBuf::from).unwrap_or_else(Vault::default_root);
+        let root = Vault::chosen_root();
         let vault = Rc::new(Vault::open(&root).unwrap_or_else(|e| panic!("can't open the notes folder {}: {e}", root.display())));
         let Index { settings, notes: metas } = vault.load();
         let first_run = metas.is_empty() && !vault.root().join(".bubblenotes").join("index.json").exists();

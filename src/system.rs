@@ -156,8 +156,9 @@ fn install_startup(app: App) {
         if last.get() == Some(want) {
             return;
         }
-        last.replace(Some(want));
-        if let Err(e) = startup::sync(want) {
+        // (At the start, or the user just changed the setting.)
+        let starting = last.replace(Some(want)).is_none();
+        if let Err(e) = startup::sync(want, starting) {
             untracked(|| app.problem.set(Some(format!("Couldn't change starting with Windows: {e}"))));
         }
     });
@@ -176,13 +177,17 @@ mod startup {
 
     /// Writes or removes the app's entry in the user's Run key, when it
     /// isn't already as wanted.
-    pub fn sync(want: bool) -> Result<(), String> {
+    /// `starting`: the app has just started, and an entry for another copy
+    /// of the app (this one is a portable copy, say) is left alone: only
+    /// the user turning the setting off removes that.
+    pub fn sync(want: bool, starting: bool) -> Result<(), String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let command = format!("\"{}\"", exe.display());
         let now = read()?;
         match (want, now) {
             (true, Some(now)) if now == command => Ok(()),
             (true, _) => write(&command),
+            (false, Some(now)) if starting && now != command => Ok(()),
             (false, Some(_)) => remove(),
             (false, None) => Ok(()),
         }

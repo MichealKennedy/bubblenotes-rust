@@ -32,6 +32,16 @@ Floating notes for the Windows desktop, built with [NSH](https://nsh.dev), in Ru
 
 `Documents/Bubble Notes`: one HTML file per note, a folder per category, images in `attachments/`. Notes save as you type. HTML files you add to the folder become notes; `.bubblenotes/index.json` holds looks, positions, alarms and settings, `.bubblenotes/trash/` holds deleted notes for 30 days, and `.bubblenotes/history/` holds each note's earlier versions.
 
+## Portable use, and the crash log
+
+- **Portable:** put the program's file in a folder with a folder named
+  `Notes` beside it. The notes, the settings and the crash log are then kept
+  in that `Notes` folder, not in Documents, and a copy run this way leaves
+  another copy's start-with-Windows entry alone.
+- **Crash log:** when the app fails, what went wrong (with the calls that
+  led there) is added to `.bubblenotes/crash.log` in the notes folder, a
+  message says so, and the app closes. See `src/crash.rs`.
+
 ## Run and test
 
 ```sh
@@ -41,7 +51,7 @@ cargo test
 
 Rust 1.97+ (`rustup update stable`). Windows: Visual Studio Build Tools with the C++ workload. The app is built for Windows; the Linux and macOS backends are declared but untested.
 
-For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize|config|configs|version|print|pdf:<file>|dock:left|dock:right|dock:top|dock:none|managerlater` does that to a note two seconds after start (for checking without the mouse). `BUBBLENOTES_MUTE=1` plays videos without sound.
+For development, `BUBBLENOTES_DIR=<folder>` uses another notes folder (and lets the app run beside the installed one, without global shortcuts or the start-with-Windows entry), `BUBBLENOTES_OPEN=manager,options,config,search` opens those windows at start, and `BUBBLENOTES_DEV=select|slash|back|autosize|config|configs|version|print|pdf:<file>|dock:left|dock:right|dock:top|dock:none|managerlater|crash|fault` does that to a note two seconds after start (for checking without the mouse). `BUBBLENOTES_MUTE=1` plays videos without sound.
 
 ## Code map
 
