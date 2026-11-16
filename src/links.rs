@@ -134,6 +134,7 @@ impl NodeView for LinkView {
             .hover(|s| s.bg(nsh_core::Color(0x0000002e)))
             .style_when(move || !alive().is_some_and(|(_, alive)| alive), |s| s.line_through().opacity(0.6))
             .cursor(Cursor::Pointer)
+            .tooltip(crate::ui::hint("Open note", ""))
             .label("Open the linked note")
             .on_press(move || {
                 let Some(app) = app else { return };

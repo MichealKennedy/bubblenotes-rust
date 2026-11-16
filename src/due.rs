@@ -4,7 +4,7 @@
 //!
 //! A date is an inline `due` node holding its time as `yyyy-mm-dd hh:mm`
 //! (local time) and whether its reminder was given. In a note's file it's
-//! `<time data-due="2026-11-20 09:00">Fri 20 Nov 09:00</time>`; in Markdown
+//! `<time data-due="2026-11-20 09:00">Fri 20 Nov 9:00 am</time>`; in Markdown
 //! and plain text, `@2026-11-20 09:00`.
 //!
 //! While something that may become a date is typed after `@`, a menu
@@ -81,7 +81,7 @@ fn time(h: u32, m: u32) -> Option<NaiveTime> {
 }
 
 /// `3pm`, `3:30pm`, `9am`, `15:00`, `noon`. A bare number isn't a time.
-fn parse_time(token: &str) -> Option<NaiveTime> {
+pub(crate) fn parse_time(token: &str) -> Option<NaiveTime> {
     if token == "noon" {
         return time(12, 0);
     }
@@ -310,10 +310,10 @@ fn offers(text: &str, now: NaiveDateTime) -> Vec<NaiveDateTime> {
     out
 }
 
-/// A date in words: "Today 15:00", "Tomorrow 09:00", "Fri 20 Nov 09:00",
-/// with the year when it isn't this one.
+/// A date in words: "Today 3:00 pm", "Tomorrow 9:00 am", "Fri 20 Nov
+/// 9:00 am", with the year when it isn't this one.
 fn label(at: NaiveDateTime, now: NaiveDateTime) -> String {
-    let time = at.format("%H:%M");
+    let time = alarms::clock(at.time());
     match (at.date() - now.date()).num_days() {
         0 => format!("Today {time}"),
         1 => format!("Tomorrow {time}"),
@@ -363,7 +363,7 @@ pub fn extension() -> Extension {
             let when = get("when");
             // What a browser shows: the date as it's kept (it reads the
             // same whenever the file is opened).
-            let shown = from_kept(&when).map_or_else(|| when.clone(), |at| at.format("%a %-d %b %Y %H:%M").to_string());
+            let shown = from_kept(&when).map_or_else(|| when.clone(), |at| format!("{} {}", at.format("%a %-d %b %Y"), alarms::clock(at.time())));
             let time = DomOutputSpec::tag("time").attr("data-due", when);
             let time = if get("notified").is_empty() { time } else { time.attr("data-notified", "1") };
             time.child(DomOutputSpec::Text(shown))
@@ -747,17 +747,17 @@ mod tests {
     #[test]
     fn the_menu_offers_what_is_meant_and_completions() {
         let shown = |text: &str| offers(text, now()).into_iter().map(|at| label(at, now())).collect::<Vec<_>>();
-        assert_eq!(shown(""), ["Today 17:00", "Tomorrow 09:00"]);
-        assert_eq!(shown("fri"), ["Fri 20 Nov 09:00"]);
-        assert_eq!(shown("t"), ["Today 17:00", "Today 20:00", "Tomorrow 09:00", "Tue 17 Nov 09:00", "Thu 19 Nov 09:00"]);
-        assert_eq!(shown("sat 8pm"), ["Sat 21 Nov 20:00"]);
+        assert_eq!(shown(""), ["Today 5:00 pm", "Tomorrow 9:00 am"]);
+        assert_eq!(shown("fri"), ["Fri 20 Nov 9:00 am"]);
+        assert_eq!(shown("t"), ["Today 5:00 pm", "Today 8:00 pm", "Tomorrow 9:00 am", "Tue 17 Nov 9:00 am", "Thu 19 Nov 9:00 am"]);
+        assert_eq!(shown("sat 8pm"), ["Sat 21 Nov 8:00 pm"]);
         assert_eq!(shown("zzz"), Vec::<String>::new());
     }
 
     #[test]
     fn a_date_round_trips_through_the_note_file_and_reads_as_text() {
         let kit = Kit::new(Relay::default());
-        let html = r#"<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><label><input type="checkbox"><span></span></label><div><p>Call the bank <time data-due="2026-11-20 09:00">Fri 20 Nov 2026 09:00</time></p></div></li></ul>"#;
+        let html = r#"<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><label><input type="checkbox"><span></span></label><div><p>Call the bank <time data-due="2026-11-20 09:00">Fri 20 Nov 2026 9:00 am</time></p></div></li></ul>"#;
         let doc = Format::Html.parse(&kit.schema, html).unwrap();
         assert_eq!(html_fragment(&doc).unwrap(), html);
         assert!(Format::Text.serialize(&doc).unwrap().contains("Call the bank @2026-11-20 09:00"));

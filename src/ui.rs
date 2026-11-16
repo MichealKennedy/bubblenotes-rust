@@ -252,7 +252,7 @@ pub fn toolbar(ctx: Ctx) -> impl IntoElement {
 }
 
 /// A hint bubble for a toolbar item: its name, and its shortcut muted.
-fn hint(label: impl Into<String>, shortcut: &'static str) -> impl IntoTooltip {
+pub(crate) fn hint(label: impl Into<String>, shortcut: &'static str) -> impl IntoTooltip {
     let bubble = nsh_base::tooltip()
         .flex_row()
         .gap(px(6.0))

@@ -492,7 +492,8 @@ fn fill_background(surface: &Surface, id: NodeId, hwnd: HWND) {
 
 /// The window's client area was resized or moved to another scale: the
 /// root view takes its size, which the core lays the root out at.
-fn resized(surface: &Surface, window: &AppWindow) {
+/// (BUBBLENOTES PATCH: whether the core was given a new size.)
+fn resized(surface: &Surface, window: &AppWindow) -> bool {
     let mut rect = RECT::default();
     // SAFETY: plain call with a local out value.
     let _ = unsafe { GetClientRect(window.hwnd, &mut rect) };
@@ -500,12 +501,63 @@ fn resized(surface: &Surface, window: &AppWindow) {
         (rect.right - rect.left).max(0) as u32,
         (rect.bottom - rect.top).max(0) as u32,
     );
+    resized_to(surface, window, pixels)
+}
+
+/// BUBBLENOTES PATCH: a see-through window about to be made smaller
+/// (`WM_WINDOWPOSCHANGING`, `pos` its new place) shows its content at the
+/// smaller size first. The window is what cuts its content off: made
+/// smaller before the frame of that size is shown, it shows the old frame
+/// cut (rounded corners square) for a frame. Shown the other way round,
+/// what's between is the smaller content in the larger window, which
+/// nobody sees: the rest of the window is see-through. Only for a window
+/// that stays where it is (its content is drawn from its top left).
+fn shrink_first(surface: &Rc<Surface>, window: &AppWindow, pos: &WINDOWPOS) {
+    if window.composition.is_none() || pos.flags.contains(SWP_NOSIZE) || !window.opened.get() {
+        return;
+    }
+    let (mut now, mut client) = (RECT::default(), RECT::default());
+    // SAFETY: plain calls with local out values.
+    unsafe {
+        if GetWindowRect(window.hwnd, &mut now).is_err() || GetClientRect(window.hwnd, &mut client).is_err() {
+            return;
+        }
+        if !IsWindowVisible(window.hwnd).as_bool() {
+            return;
+        }
+    }
+    if !pos.flags.contains(SWP_NOMOVE) && (pos.x != now.left || pos.y != now.top) {
+        return;
+    }
+    let (dw, dh) = (pos.cx - (now.right - now.left), pos.cy - (now.bottom - now.top));
+    if dw >= 0 && dh >= 0 {
+        return;
+    }
+    // The smaller of now and then, each way.
+    let pixels = (
+        (client.right - client.left + dw.min(0)).max(0) as u32,
+        (client.bottom - client.top + dh.min(0)).max(0) as u32,
+    );
+    if pixels.0 == 0 || pixels.1 == 0 || pixels == window.pixels.get() {
+        return;
+    }
+    if resized_to(surface, window, pixels) {
+        surface.await_turn();
+    }
+    paint(surface, window);
+    // Until that frame is on the screen.
+    // SAFETY: a plain call.
+    let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
+}
+
+/// The window's client area is (or is about to be) `pixels` big.
+fn resized_to(surface: &Surface, window: &AppWindow, pixels: (u32, u32)) -> bool {
     let scale = crate::window::dpi(window.hwnd) as f32 / 96.0;
     window.pixels.set(pixels);
     window.scale.set(scale);
     // Minimized: the root keeps its size.
     if pixels.0 == 0 || pixels.1 == 0 {
-        return;
+        return false;
     }
     let size = Size::new(
         Points(pixels.0 as f32 / scale),
@@ -515,12 +567,14 @@ fn resized(surface: &Surface, window: &AppWindow) {
     if std::mem::replace(&mut window.view.state_mut().frame, frame) != frame {
         window.view.moved();
     }
-    if window.reported.replace(Some(size)) != Some(size) {
+    let changed = window.reported.replace(Some(size)) != Some(size);
+    if changed {
         surface.control(|c| c.set_root_size(window.id, size, EdgeInsets::default()));
         // The dialogs presented in it follow its size.
         crate::navigation::surface_resized(surface, size.width.0, size.height.0);
     }
     invalidate(window);
+    changed
 }
 
 /// Draws `window` (`WM_PAINT`, and at once when resized).
@@ -758,6 +812,15 @@ pub(crate) fn handle(
             Some(Some(LRESULT(0)))
         }
         WM_ERASEBKGND => Some(Some(LRESULT(1))),
+        // BUBBLENOTES PATCH: see `shrink_first`.
+        WM_WINDOWPOSCHANGING => {
+            if let Some(window) = &window {
+                // SAFETY: `lparam` is the window's new place.
+                let pos = unsafe { &*(lparam.0 as *const WINDOWPOS) };
+                shrink_first(surface, window, pos);
+            }
+            None
+        }
         WM_SIZE => {
             // The frame's material follows the zoom state.
             crate::shell::zoom_changed(hwnd);
@@ -765,7 +828,11 @@ pub(crate) fn handle(
                 // What DWM shows past the last frame meanwhile, as the main
                 // window's.
                 fill_background(surface, id, hwnd);
-                resized(surface, window);
+                // BUBBLENOTES PATCH: the frame drawn now waits for the
+                // layout at the new size (see `Surface::await_turn`).
+                if resized(surface, window) {
+                    surface.await_turn();
+                }
                 // Drawn now, so that it never shows stretched or stale
                 // pixels while it is resized.
                 paint(surface, window);

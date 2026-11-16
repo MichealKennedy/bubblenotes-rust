@@ -263,7 +263,7 @@ fn alarm_entries(m: &NoteMeta, now: f64) -> Vec<Entry> {
     out.extend([
         item("In 15 minutes", Action::AlarmIn(15.0 * MINUTE)),
         item("In 1 hour", Action::AlarmIn(HOUR)),
-        item("Tomorrow 9:00", Action::AlarmTomorrow),
+        item("Tomorrow 9:00 am", Action::AlarmTomorrow),
         Entry::Separator,
         item("Custom…", Action::AlarmCustom),
     ]);
@@ -872,7 +872,7 @@ mod tests {
             ]
         );
         assert_eq!(labels(sub(&menu, "Sleep")), ["15 minutes", "1 hour", "4 hours", "Until tomorrow 9:00", "Until Monday 9:00"]);
-        assert_eq!(labels(sub(&menu, "Alarm")), ["In 15 minutes", "In 1 hour", "Tomorrow 9:00", "---", "Custom…"]);
+        assert_eq!(labels(sub(&menu, "Alarm")), ["In 15 minutes", "In 1 hour", "Tomorrow 9:00 am", "---", "Custom…"]);
         assert_eq!(labels(sub(&menu, "Move to")), ["[x] No category", "---", "New category…"]);
         let themes = labels(sub(&menu, "Theme"));
         assert_eq!(themes[0], "[x] Butter");

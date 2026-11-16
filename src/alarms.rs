@@ -16,8 +16,13 @@ use nsh_core::prelude::*;
 use crate::app::{App, Note, NoteCommand};
 use crate::model::{Alarm, NoteMeta, Repeat};
 
-/// How the user reads and types a moment.
+/// A moment typed with a 24 hour time (still taken).
 const FORMAT: &str = "%Y-%m-%d %H:%M";
+
+/// A time of day as it's shown everywhere: "9:00 am", "3:05 pm".
+pub fn clock(time: NaiveTime) -> String {
+    time.format("%-I:%M %P").to_string()
+}
 
 thread_local! {
     /// The user was asked to allow notifications (once is enough).
@@ -138,20 +143,25 @@ fn beep() -> bool {
     false
 }
 
-/// A moment as the user reads and types it: `yyyy-mm-dd hh:mm`, local time.
+/// A moment as the user reads and types it: `2026-11-14 9:48 pm`, local
+/// time.
 pub fn format_at(ms: f64) -> String {
-    to_local(ms).format(FORMAT).to_string()
+    format_local(to_local(ms))
 }
 
-/// A past moment in words: "Today 14:32", "Yesterday 09:10",
-/// "Sat 14 Nov 14:32", with the year when it isn't this one.
+fn format_local(at: NaiveDateTime) -> String {
+    format!("{} {}", at.format("%Y-%m-%d"), clock(at.time()))
+}
+
+/// A past moment in words: "Today 2:32 pm", "Yesterday 9:10 am",
+/// "Sat 14 Nov 2:32 pm", with the year when it isn't this one.
 pub fn describe_past(ms: f64, now: f64) -> String {
     describe_past_local(to_local(ms), to_local(now))
 }
 
 fn describe_past_local(at: NaiveDateTime, now: NaiveDateTime) -> String {
     let days = (now.date() - at.date()).num_days();
-    let time = at.format("%H:%M");
+    let time = clock(at.time());
     match days {
         0 => format!("Today {time}"),
         1 => format!("Yesterday {time}"),
@@ -160,8 +170,8 @@ fn describe_past_local(at: NaiveDateTime, now: NaiveDateTime) -> String {
     }
 }
 
-/// The moment typed as `yyyy-mm-dd hh:mm` (local time), in milliseconds
-/// since the Unix epoch.
+/// The moment typed as `yyyy-mm-dd h:mm am/pm` (local time; a 24 hour
+/// time is taken too), in milliseconds since the Unix epoch.
 pub fn parse_at(text: &str) -> Option<f64> {
     parse_local(text).map(from_local)
 }
@@ -215,9 +225,17 @@ fn from_local(time: NaiveDateTime) -> f64 {
 
 fn parse_local(text: &str) -> Option<NaiveDateTime> {
     let text = text.trim();
-    NaiveDateTime::parse_from_str(text, FORMAT)
-        .ok()
-        .or_else(|| NaiveDate::parse_from_str(text, "%Y-%m-%d").ok().map(|d| d.and_time(nine())))
+    if let Ok(at) = NaiveDateTime::parse_from_str(text, FORMAT) {
+        return Some(at);
+    }
+    let (date, time) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    let date = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+    // "9:48 pm", "9:48pm", "9 PM", "9:48 p.m.": as one word.
+    let time: String = time.to_lowercase().chars().filter(|c| !c.is_whitespace() && *c != '.').collect();
+    if time.is_empty() {
+        return Some(date.and_time(nine()));
+    }
+    crate::due::parse_time(&time).map(|time| date.and_time(time))
 }
 
 fn nine() -> NaiveTime {
@@ -308,7 +326,7 @@ fn describe_local(sleep: Option<(NaiveDateTime, f64)>, alarm: Option<(NaiveDateT
     }
     if let Some((at, repeat)) = alarm {
         let days = (at.date() - now.date()).num_days();
-        let time = at.format("%H:%M");
+        let time = clock(at.time());
         let when = match days {
             0 => format!("today at {time}"),
             1 => format!("tomorrow at {time}"),
@@ -328,15 +346,15 @@ fn describe_local(sleep: Option<(NaiveDateTime, f64)>, alarm: Option<(NaiveDateT
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-/// When a long sleep ends: "21:48", "tomorrow 09:00", "Monday 09:00" within
-/// the week, else the date.
+/// When a long sleep ends: "9:48 pm", "tomorrow 9:00 am", "Monday 9:00 am"
+/// within the week, else the date.
 fn sleep_end(until: NaiveDateTime, now: NaiveDateTime) -> String {
-    let time = until.format("%H:%M");
+    let time = clock(until.time());
     match (until.date() - now.date()).num_days() {
-        0 => time.to_string(),
+        0 => time,
         1 => format!("tomorrow {time}"),
         2..=6 => format!("{} {time}", until.format("%A")),
-        _ => until.format(FORMAT).to_string(),
+        _ => format_local(until),
     }
 }
 
@@ -377,7 +395,19 @@ mod tests {
     #[test]
     fn formats_and_parses_back() {
         let ms = parse_at("2026-03-07 21:48").unwrap();
-        assert_eq!(format_at(ms), "2026-03-07 21:48");
+        assert_eq!(format_at(ms), "2026-03-07 9:48 pm");
+        // What's shown can be typed back, and so can looser forms.
+        for typed in ["2026-03-07 9:48 pm", "2026-03-07 9:48pm", "2026-03-07  9:48 PM", "2026-03-07 9:48 p.m."] {
+            assert_eq!(parse_at(typed), Some(ms), "{typed}");
+        }
+        assert_eq!(parse_local("2026-03-07 9 am"), Some(t("2026-03-07 09:00")));
+        assert_eq!(parse_local("2026-03-07 12:05 am"), Some(t("2026-03-07 00:05")));
+        assert_eq!(parse_local("2026-03-07 12 pm"), Some(t("2026-03-07 12:00")));
+        assert_eq!(parse_local("2026-03-07 noon"), Some(t("2026-03-07 12:00")));
+        assert_eq!(parse_local("2026-03-07 13 pm"), None);
+        assert_eq!(parse_local("2026-03-07 soon"), None);
+        assert_eq!(clock(t("2026-03-07 00:05").time()), "12:05 am");
+        assert_eq!(clock(t("2026-03-07 12:00").time()), "12:00 pm");
     }
 
     #[test]
@@ -448,17 +478,17 @@ mod tests {
     fn in_words() {
         let now = t("2026-11-14 20:00");
         assert_eq!(describe_local(None, None, now), None);
-        assert_eq!(describe_local(None, Some((t("2026-11-14 21:48"), Repeat::None)), now).as_deref(), Some("Alarm today at 21:48"));
+        assert_eq!(describe_local(None, Some((t("2026-11-14 21:48"), Repeat::None)), now).as_deref(), Some("Alarm today at 9:48 pm"));
         assert_eq!(
             describe_local(None, Some((t("2026-11-15 09:00"), Repeat::Daily)), now).as_deref(),
-            Some("Alarm tomorrow at 09:00, repeats daily")
+            Some("Alarm tomorrow at 9:00 am, repeats daily")
         );
-        assert_eq!(describe_local(None, Some((t("2026-11-20 08:00"), Repeat::None)), now).as_deref(), Some("Alarm on 2026-11-20 at 08:00"));
+        assert_eq!(describe_local(None, Some((t("2026-11-20 08:00"), Repeat::None)), now).as_deref(), Some("Alarm on 2026-11-20 at 8:00 am"));
         assert_eq!(describe_local(Some((t("2026-11-14 20:12"), 11.5 * 60_000.0)), None, now).as_deref(), Some("Asleep for 12 min"));
         assert_eq!(
             describe_local(Some((t("2026-11-15 09:00"), 13.0 * 3_600_000.0)), Some((t("2026-11-16 09:00"), Repeat::Weekdays)), now).as_deref(),
-            Some("Asleep until tomorrow 09:00 · Alarm on 2026-11-16 at 09:00, repeats on weekdays")
+            Some("Asleep until tomorrow 9:00 am · Alarm on 2026-11-16 at 9:00 am, repeats on weekdays")
         );
-        assert_eq!(describe_local(Some((t("2026-11-16 09:00"), 37.0 * 3_600_000.0)), None, now).as_deref(), Some("Asleep until Monday 09:00"));
+        assert_eq!(describe_local(Some((t("2026-11-16 09:00"), 37.0 * 3_600_000.0)), None, now).as_deref(), Some("Asleep until Monday 9:00 am"));
     }
 }

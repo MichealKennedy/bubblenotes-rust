@@ -427,7 +427,11 @@ impl Geometry {
             .sum();
         let text = self.measure_text(&without(inked_units));
         let rest = (line.width.0 - views).max(0.0);
-        let scale = if text.0 > 0.0 { rest / text.0 } else { 0.0 };
+        // BUBBLENOTES PATCH: a line of views alone (a link, then the spaces
+        // typed after it) has no text to scale by: its spaces are as wide as
+        // they measure, where they counted for nothing (the caret stood
+        // still after a space typed behind a link).
+        let scale = if text.0 > 0.0 { rest / text.0 } else { 1.0 };
         Points(self.measure_text(&without(k)).0 * scale + views_before)
     }
 

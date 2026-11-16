@@ -668,14 +668,14 @@ fn alarm_part(app: App, note: Note) -> impl IntoElement {
                         .gap(px(6.0))
                         .child(text("At").w(px(18.0)).text_size(px(13.0)).text_color(move || theme().foreground))
                         .child(
-                            text_input(move || at_text.get(), move |t| at_text.set(t), "2026-11-14 21:48")
-                                .w(px(150.0))
+                            text_input(move || at_text.get(), move |t| at_text.set(t), "2026-11-14 9:48 pm")
+                                .w(px(172.0))
                                 .on_focus(move || at_mode.set(true)),
                         ),
                 )),
         )
         .child(
-            text(move || if typed_ok() { "Date format: yyyy-mm-dd hh:mm".to_string() } else { "That's not a date: use yyyy-mm-dd hh:mm".to_string() })
+            text(move || if typed_ok() { "Date and time, like 2026-11-14 9:48 pm".to_string() } else { "That's not a date: write it like 2026-11-14 9:48 pm".to_string() })
                 .text_size(px(11.0))
                 .pl(px(24.0))
                 .text_color(move || if typed_ok() { theme().muted_foreground } else { theme().destructive }),

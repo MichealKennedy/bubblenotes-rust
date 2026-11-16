@@ -687,6 +687,43 @@ impl Surface {
         }
     }
 
+    /// BUBBLENOTES PATCH: waits for the engine's layout of a window of the
+    /// app's own at its new size, and applies what it sent meanwhile, as
+    /// `await_layout` does for the main window. Without it such a window's
+    /// frame in `WM_SIZE` drew the layout of its old size: a see-through
+    /// window being made smaller showed its content cut off (its rounded
+    /// corners square) until the next frame. At most [`RESIZE_WAIT`].
+    pub(crate) fn await_turn(self: &Rc<Self>) {
+        if self.mounter.try_borrow_mut().is_err() || self.control.borrow().is_none() {
+            return;
+        }
+        let Some(rx) = self.rx.borrow().clone() else {
+            return;
+        };
+        // The engine runs what is due (the layout at the new size), submits
+        // its batches, then says so.
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        self.control(|c| c.flush(move |_| flag.store(true, Ordering::Release)));
+        let deadline = std::time::Instant::now() + RESIZE_WAIT;
+        let mut applied = false;
+        loop {
+            // Read first: what was submitted before it is then in the channel.
+            let finished = done.load(Ordering::Acquire);
+            while let Ok(message) = rx.try_recv() {
+                applied |= self.handle(message);
+            }
+            if finished || std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        if applied {
+            self.write_animations();
+            self.ensure_ticking();
+        }
+    }
+
     /// Asks for the whole window to be drawn again (once, however often
     /// asked before it is).
     pub(crate) fn invalidate(&self) {

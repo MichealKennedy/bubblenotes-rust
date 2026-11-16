@@ -1186,11 +1186,11 @@ fn when(ms: f64, now: f64) -> String {
         return String::new();
     };
     if then.date_naive() == today.date_naive() {
-        then.format("today at %H:%M").to_string()
+        then.format("today at %-I:%M %P").to_string()
     } else if today.date_naive().pred_opt() == Some(then.date_naive()) {
-        then.format("yesterday at %H:%M").to_string()
+        then.format("yesterday at %-I:%M %P").to_string()
     } else if then.format("%Y").to_string() == today.format("%Y").to_string() {
-        then.format("%-d %b at %H:%M").to_string()
+        then.format("%-d %b at %-I:%M %P").to_string()
     } else {
         then.format("%-d %b %Y").to_string()
     }
