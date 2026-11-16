@@ -563,7 +563,7 @@ fn sleep_part(app: App, note: Note) -> impl IntoElement {
                 .gap(px(6.0))
                 .child(small_button(|| "15 min".into(), move || s1(15.0 * 60_000.0)))
                 .child(small_button(|| "1 hour".into(), move || s2(3_600_000.0)))
-                .child(small_button(|| "Tomorrow 9:00".into(), move || {
+                .child(small_button(|| "Tomorrow 9:00 am".into(), move || {
                     let now = crate::store::now_ms();
                     if let Some(at) = tomorrow_at_nine(now) {
                         s3(at - now);

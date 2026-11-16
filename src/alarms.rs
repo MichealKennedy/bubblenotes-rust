@@ -176,7 +176,7 @@ pub fn parse_at(text: &str) -> Option<f64> {
     parse_local(text).map(from_local)
 }
 
-/// What's set on a note, in words ("Alarm tomorrow at 09:00, repeats daily",
+/// What's set on a note, in words ("Alarm tomorrow at 9:00 am, repeats daily",
 /// "Asleep for 12 min"), or `None` when nothing is.
 pub fn describe(meta: &NoteMeta, now: f64) -> Option<String> {
     let sleep = meta.sleep_until.filter(|&until| until > now).map(|until| (to_local(until), until - now));

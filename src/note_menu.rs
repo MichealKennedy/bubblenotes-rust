@@ -243,8 +243,8 @@ fn sleep_entries(m: &NoteMeta, now: f64) -> Vec<Entry> {
         item("15 minutes", Action::SleepFor(15.0 * MINUTE)),
         item("1 hour", Action::SleepFor(HOUR)),
         item("4 hours", Action::SleepFor(4.0 * HOUR)),
-        item("Until tomorrow 9:00", Action::SleepUntilTomorrow),
-        item("Until Monday 9:00", Action::SleepUntilMonday),
+        item("Until tomorrow 9:00 am", Action::SleepUntilTomorrow),
+        item("Until Monday 9:00 am", Action::SleepUntilMonday),
     ];
     if m.asleep(now) {
         out.extend([Entry::Separator, item("Wake up", Action::Wake)]);
@@ -871,7 +871,7 @@ mod tests {
                 "Arrange >",
             ]
         );
-        assert_eq!(labels(sub(&menu, "Sleep")), ["15 minutes", "1 hour", "4 hours", "Until tomorrow 9:00", "Until Monday 9:00"]);
+        assert_eq!(labels(sub(&menu, "Sleep")), ["15 minutes", "1 hour", "4 hours", "Until tomorrow 9:00 am", "Until Monday 9:00 am"]);
         assert_eq!(labels(sub(&menu, "Alarm")), ["In 15 minutes", "In 1 hour", "Tomorrow 9:00 am", "---", "Custom…"]);
         assert_eq!(labels(sub(&menu, "Move to")), ["[x] No category", "---", "New category…"]);
         let themes = labels(sub(&menu, "Theme"));
