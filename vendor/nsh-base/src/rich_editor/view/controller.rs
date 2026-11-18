@@ -193,6 +193,11 @@ pub(crate) struct Rv {
     autoscroll: Rc<RefCell<AutoScroll>>,
     /// The state's scroll request was not carried out yet.
     scroll_pending: Rc<Cell<bool>>,
+    /// BUBBLENOTES PATCH: until when the caret is followed after a scroll
+    /// request (set by the first scroll): a new line is laid out after the
+    /// request is first seen, so the view follows the layout passes that
+    /// come right after it.
+    scroll_until: Rc<Cell<Option<std::time::Instant>>>,
     /// BUBBLENOTES PATCH: where the view is still to be scrolled to, as
     /// the session's last view was (`EditorSession::scroll_top`).
     pub(crate) restore_scroll: Rc<Cell<Option<Points>>>,
@@ -256,6 +261,7 @@ impl Rv {
             content_height: signal(px(0.0)),
             autoscroll: Rc::default(),
             scroll_pending: Rc::default(),
+            scroll_until: Rc::default(),
             blink_task: Rc::default(),
             base_keymap: Rc::new(base_keymap),
             table_gesture: Rc::default(),
@@ -417,6 +423,7 @@ impl Rv {
         }
         if state.scroll_to_selection() != old.scroll_to_selection() {
             self.scroll_pending.set(true);
+            self.scroll_until.set(None);
         }
         if doc_changed {
             self.cx.emit(RichEditorEvent::Change(RichEditorChange {
@@ -2186,21 +2193,33 @@ impl Rv {
             .any(|p| p.handle_scroll_to_selection(&state))
         {
             self.scroll_pending.set(false);
+            self.scroll_until.set(None);
+            return;
+        }
+        // BUBBLENOTES PATCH: the caret is followed for a moment after the
+        // first scroll (see `scroll_until`), with room around it.
+        let now = std::time::Instant::now();
+        if self.scroll_until.get().is_some_and(|until| now > until) {
+            self.scroll_pending.set(false);
+            self.scroll_until.set(None);
             return;
         }
         let Some(caret) = self.caret_rect() else {
             return;
         };
-        self.scroll_pending.set(false);
         let top = self.scroll_y.get_untracked();
         let height = self.viewport.get_untracked().height;
         if height <= px(0.0) {
             return;
         }
-        let y = if caret.origin.y < top {
-            caret.origin.y
-        } else if caret.origin.y + caret.size.height > top + height {
-            caret.origin.y + caret.size.height - height
+        if self.scroll_until.get().is_none() {
+            self.scroll_until.set(Some(now + std::time::Duration::from_millis(300)));
+        }
+        let margin = px(12.0).min(height / 4.0);
+        let y = if caret.origin.y - margin < top {
+            caret.origin.y - margin
+        } else if caret.origin.y + caret.size.height + margin > top + height {
+            caret.origin.y + caret.size.height + margin - height
         } else {
             return;
         };

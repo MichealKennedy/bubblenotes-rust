@@ -174,7 +174,7 @@ impl Kit {
         // come before the keymap's (which would split the paragraph). A
         // pasted YouTube link becomes a card before Markdown or the link
         // extension take it as text.
-        let mut plugins = vec![slash::plugin(), links::plugin(), crate::due::plugin(), media::paste_plugin()];
+        let mut plugins = vec![slash::plugin(), links::plugin(), crate::emoji::plugin(), crate::due::plugin(), media::paste_plugin()];
         plugins.extend(manager.plugins());
         // Markdown pasted as plain text is read as Markdown, and copies put
         // Markdown on the clipboard (the starter kit has the typing rules).

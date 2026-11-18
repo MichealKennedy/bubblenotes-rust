@@ -34,12 +34,14 @@
 mod actions;
 mod alarms;
 mod app;
+mod blocks;
 mod bubble;
 mod config_panel;
 pub mod crash;
 mod drag;
 mod due;
 mod editor_view;
+mod emoji;
 mod formats;
 mod kit;
 mod layout;

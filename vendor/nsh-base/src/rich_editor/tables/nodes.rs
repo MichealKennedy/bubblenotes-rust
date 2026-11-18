@@ -169,10 +169,14 @@ fn cell(name: &str, tag: &'static str, role: TableRole) -> (String, NodeSpec) {
                         .collect::<Vec<_>>()
                         .join(",")
                 });
+                // BUBBLENOTES PATCH: a cell's background colour.
+                let background = src.attr("background").and_then(Value::as_str).map(str::to_owned);
                 DomOutputSpec::tag(tag)
                     .attr("colspan", span("colspan"))
                     .attr("rowspan", span("rowspan"))
                     .attr("data-colwidth", colwidth)
+                    .attr("data-background", background.clone())
+                    .attr("style", background.map(|c| format!("background-color: {c}")))
                     .hole()
             })),
             parse_dom: vec![
@@ -184,6 +188,7 @@ fn cell(name: &str, tag: &'static str, role: TableRole) -> (String, NodeSpec) {
                 ("colspan".into(), attr(Value::from(1))),
                 ("rowspan".into(), attr(Value::from(1))),
                 ("colwidth".into(), attr(Value::Null)),
+                ("background".into(), attr(Value::Null)),
             ],
             extra: extra(role),
             ..Default::default()
@@ -217,6 +222,10 @@ fn cell_attrs(el: &DomElement) -> Attrs {
     attrs.insert("colspan".into(), Value::from(colspan));
     attrs.insert("rowspan".into(), Value::from(span("rowspan")));
     attrs.insert("colwidth".into(), colwidth.unwrap_or(Value::Null));
+    attrs.insert(
+        "background".into(),
+        el.attr("data-background").map_or(Value::Null, |c| Value::String(c.trim().to_owned())),
+    );
     attrs
 }
 

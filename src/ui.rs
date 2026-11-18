@@ -30,8 +30,19 @@ pub struct Ctx {
     pub status: Signal<String>,
     /// The selection menu shows its link editor.
     pub editing_link: Signal<bool>,
+    /// The selection menu's text colors panel.
+    pub color_panel: Signal<ColorPanel>,
     /// What an action that needs the app's UI does.
     pub app: Stored<Rc<dyn Fn(AppAction)>>,
+}
+
+/// The selection menu's text colors: closed, the named colors, or those and
+/// the picker for any color.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ColorPanel {
+    Closed,
+    Named,
+    Custom,
 }
 
 impl Ctx {
@@ -117,19 +128,40 @@ pub fn separator() -> impl IntoElement {
 }
 
 /// Sets the text color at the selection (`None`: back to the default).
-fn set_color(ctx: Ctx, css: Option<&'static str>) {
-    ctx.editor.with_untracked(|e| match css {
-        Some(css) => e.run("setTextStyle", json!({ "color": css })),
-        None => e.run("unsetTextStyle", json!({})),
-    });
+fn set_color(ctx: Ctx, css: Option<&str>) {
+    set_style(ctx, "color", css);
+}
+
+/// Sets a text style attribute at the selection (`None`: off).
+fn set_style(ctx: Ctx, key: &str, value: Option<&str>) {
+    ctx.editor.with_untracked(|e| actions::set_style(e, key, value));
     ctx.changed();
 }
 
-/// A catalog color's name, from its class (`text-red-600`: "Red").
-fn color_name(class: &str) -> String {
-    let hue = class.split('-').nth(1).unwrap_or("Color");
-    let mut chars = hue.chars();
-    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+/// The text color at the selection, as CSS (`None`: the default).
+fn current_color(ctx: Ctx) -> Option<String> {
+    current_style(ctx, "color")
+}
+
+/// A text style attribute at the selection, lowercase (`None`: not set).
+fn current_style(ctx: Ctx, key: &str) -> Option<String> {
+    ctx.revision.get();
+    ctx.editor.with(|e| actions::style_of(e, key).map(|v| v.to_lowercase()))
+}
+
+/// The text colors as a native menu: the default, the named colors (the
+/// current one checked) and "Custom color…", which opens the selection
+/// menu's picker.
+fn color_menu_items(ctx: Ctx) -> Vec<MenuItem> {
+    let current = untracked(|| current_color(ctx));
+    let mut items = vec![MenuItem::new("Default").checked(current.is_none()).on_select(move || set_color(ctx, None)), MenuItem::separator()];
+    items.extend(actions::COLORS.iter().map(|(name, css)| {
+        MenuItem::new(*name).checked(current.as_deref() == Some(*css)).on_select(move || set_color(ctx, Some(css)))
+    }));
+    items.push(MenuItem::separator());
+    let selected = untracked(|| ctx.editor.with(|e| !e.state().selection().empty()));
+    items.push(MenuItem::new("Custom color…").disabled(!selected).on_select(move || ctx.color_panel.set(ColorPanel::Custom)));
+    items
 }
 
 // ----- Toolbar --------------------------------------------------------------------
@@ -152,7 +184,7 @@ impl Slot {
     fn width(self) -> f32 {
         match self {
             Slot::Action(_) => TOOL_WIDTH,
-            Slot::Colors => SWATCH_WIDTH * (actions::COLORS.len() + 1) as f32,
+            Slot::Colors => SWATCH_WIDTH * 2.0,
         }
     }
 }
@@ -313,11 +345,12 @@ fn tool(ctx: Ctx, action: &'static Action) -> AnyElement {
     }
 }
 
-/// The text colors: the default, then the catalog's dots.
+/// The text colors: the default, and a dot of the current color that
+/// opens the menu of all of them.
 fn swatches(ctx: Ctx) -> AnyElement {
-    let dot = |css: Option<&'static str>, rgb: Option<u32>, label: String| {
+    let dot = |label: &'static str, fill: Box<dyn Fn() -> AdaptiveColor>, glyph: &'static str, press: Box<dyn Fn()>| {
         nsh_base::button()
-            .accessibility_label(label.clone())
+            .accessibility_label(label)
             .w(px(18.0))
             .h(px(18.0))
             .items_center()
@@ -325,25 +358,32 @@ fn swatches(ctx: Ctx) -> AnyElement {
             .rounded_full()
             .border_1()
             .border_color(move || tint(0.18))
-            .bg(move || -> AdaptiveColor {
-                match rgb {
-                    Some(rgb) => nsh_core::color::rgb(rgb).into(),
-                    None => theme().background,
-                }
-            })
+            .bg(fill)
             .hover(|s| s.scale(1.12))
             .active(|s| s.opacity(0.6))
-            .cursor(Cursor::Pointer).on_press(move || set_color(ctx, css))
-            .child(hinted(hint(label, ""), text(if rgb.is_none() { "A" } else { "" }).text_size(px(10.0)).text_color(move || theme().foreground)))
+            .cursor(Cursor::Pointer)
+            .on_press(press)
+            .child(hinted(hint(label, ""), text(glyph).text_size(px(10.0)).text_color(move || theme().foreground)))
             .into_element()
     };
+    let current = move || current_color(ctx).and_then(|c| actions::color_rgb(&c));
     nsh_base::toolbar_group()
         .accessibility_label("Text color")
         .items_center()
         .gap(px(4.0))
         .px(px(2.0))
-        .child(dot(None, None, "Default text color".into()))
-        .children(actions::COLORS.iter().map(|(css, class, rgb)| dot(Some(css), Some(*rgb), color_name(class))))
+        .child(dot("Default text color", Box::new(move || theme().background), "A", Box::new(move || set_color(ctx, None))))
+        .child(dot(
+            "Text color",
+            Box::new(move || match current() {
+                Some(rgb) => nsh_core::color::rgb(rgb).into(),
+                None => theme().background,
+            }),
+            "▾",
+            Box::new(move || {
+                let _ = popup_menu(color_menu_items(ctx));
+            }),
+        ))
         .into_element()
 }
 
@@ -362,14 +402,7 @@ fn more_button(ctx: Ctx, hidden: Vec<Vec<Slot>>) -> AnyElement {
                         .checked(untracked(|| ctx.is_active(action)))
                         .disabled(!untracked(|| ctx.is_enabled(action)))
                         .on_select(move || ctx.perform(action)),
-                    Slot::Colors => MenuItem::submenu(
-                        "Text color",
-                        std::iter::once(MenuItem::new("Default").on_select(move || set_color(ctx, None))).chain(
-                            actions::COLORS.iter().map(move |(css, class, _)| {
-                                MenuItem::new(color_name(class)).on_select(move || set_color(ctx, Some(css)))
-                            }),
-                        ),
-                    ),
+                    Slot::Colors => MenuItem::submenu("Text color", color_menu_items(ctx)),
                 });
             }
         }
@@ -411,7 +444,11 @@ pub fn slash_menu(ctx: Ctx, window_height: Signal<f32>) -> impl IntoElement {
         ctx.editor.with_untracked(slash::remove_query);
         ctx.perform(action);
         // A click on the menu takes the focus from the text as it ends:
-        // give it back once it has.
+        // give it back once it has. Not when the action opened the link
+        // editor: its field has the focus.
+        if ctx.editing_link.get_untracked() {
+            return;
+        }
         owner.run(|| {
             let _ = set_timeout(std::time::Duration::from_millis(60), move || {
                 ctx.editor.with_untracked(|e| e.session.focus());
@@ -530,7 +567,7 @@ fn popup() -> View {
         .shadow_lg()
 }
 
-/// A row of a menu: the action's glyph in a tile, its label and hint.
+/// A row of a menu: the action's glyph in a tile and its label.
 fn menu_row(
     action: &'static Action,
     highlighted: impl Fn() -> bool + 'static,
@@ -540,9 +577,9 @@ fn menu_row(
     view()
         .flex_row()
         .items_center()
-        .gap_3()
+        .gap_2()
         .px_2()
-        .py(px(6.0))
+        .py(px(4.0))
         .rounded(px(6.0))
         .bg(move || if highlighted() { theme().accent } else { theme().popover })
         .on_mouse_move(move |e: &MouseEvent| hover((e.page_position.x.0, e.page_position.y.0)))
@@ -553,22 +590,18 @@ fn menu_row(
         .cursor(Cursor::Pointer).on_press(press)
         .child(
             view()
-                .w(px(30.0))
-                .h(px(30.0))
+                .w(px(20.0))
+                .h(px(20.0))
                 .items_center()
                 .justify_center()
-                .rounded(px(6.0))
+                .rounded(px(5.0))
                 .border_1()
                 .border_color(move || theme().border)
                 .bg(move || theme().background)
-                .child(text(action.glyph).text_size(px(13.0)).text_color(move || theme().popover_foreground)),
+                .child(text(action.glyph).text_size(px(10.5)).text_color(move || theme().popover_foreground)),
         )
-        .child(
-            view()
-                // Its own colour: text here doesn't take the popup's.
-                .child(text(action.label).text_size(px(14.0)).text_color(move || theme().popover_foreground))
-                .child(text(action.hint).text_size(px(12.0)).text_color(move || theme().muted_foreground)),
-        )
+        // Its own colour: text here doesn't take the popup's.
+        .child(text(action.label).text_size(px(13.0)).text_color(move || theme().popover_foreground))
 }
 
 // ----- The selection menu -------------------------------------------------------
@@ -583,33 +616,74 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
     let fit = move || sized.state().map(|s| s.bounds.size.width.0 - 12.0).unwrap_or(400.0);
     let more = signal(false);
     let link = signal(String::new());
-    // A new selection closes "…" and the link editor.
+    // The link's text, as shown in the link editor.
+    let link_text = signal(String::new());
+    // What the link editor edits: the range it was opened on (the whole
+    // link when it was opened in one; empty for new linked text), its text
+    // then, and whether it was a link.
+    let link_range = stored(None::<(usize, usize)>);
+    let link_was = stored(String::new());
+    let had_link = signal(false);
+    // A new selection closes "…" and the colors (not a change of the text
+    // at the same place: a color being picked); outside the link being
+    // edited, it closes the link editor too (it would edit the wrong text).
+    let place = stored(None::<(u32, u32)>);
     effect(move || {
-        ctx.selection.with(|_| ());
-        more.set(false);
-    });
-    let visible = move || {
-        let selected = ctx.selection.with(|s| s.as_ref().is_some_and(|s| !s.empty && s.kind == "text"));
-        (selected || ctx.editing_link.get()) && ctx.slash_open().is_none() && !ctx.read_only.get()
-    };
-    // Opening the link editor starts from the link's address.
-    effect(move || {
-        if ctx.editing_link.get() {
-            let href = ctx.editor.with_untracked(|e| e.attributes("link").get("href").and_then(|h| h.as_str().map(String::from)));
-            link.set(href.unwrap_or_default());
+        let now = ctx.selection.with(|s| s.as_ref().map(|s| (s.anchor, s.head)));
+        if place.get() != now {
+            place.replace(now);
+            more.set(false);
+            ctx.color_panel.set(ColorPanel::Closed);
+            if let (Some((anchor, head)), Some((from, to))) = (now, link_range.get())
+                && untracked(|| ctx.editing_link.get())
+            {
+                let inside = |p: u32| (from as u32..=to as u32).contains(&p);
+                if !inside(anchor) || !inside(head) {
+                    ctx.editing_link.set(false);
+                }
+            }
         }
     });
+    let visible = move || {
+        let selected = ctx.selection.with(|s| s.as_ref().is_some_and(|s| !s.empty && (s.kind == "text" || s.kind == "cell")));
+        (selected || ctx.editing_link.get()) && ctx.slash_open().is_none() && !ctx.read_only.get()
+    };
+    // Opening the link editor takes the range, its text and its address.
+    effect(move || {
+        if ctx.editing_link.get() {
+            untracked(|| {
+                let (range, text, href, linked) = ctx.editor.with(|e| {
+                    let state = e.state();
+                    let (from, to) = (state.selection().from(), state.selection().to());
+                    let href = e.attributes("link").get("href").and_then(|h| h.as_str().map(String::from));
+                    (Some((from, to)), state.doc().text_between(from, to, Some(" "), None), href, e.is_active("link", None))
+                });
+                link_range.replace(range);
+                link_was.replace(text.clone());
+                link_text.set(text);
+                link.set(href.unwrap_or_default());
+                had_link.set(linked);
+            });
+        } else {
+            link_range.replace(None);
+        }
+    });
+    // Applies the editor's text and address to its range (no address: the
+    // link is removed).
     let apply_link = move || {
+        let Some((from, to)) = link_range.get() else { return };
         let href = normalize_href(&link.get_untracked());
-        ctx.editor.with_untracked(|e| {
-            if href.is_empty() {
-                e.run("unsetLink", json!({}));
-            } else {
-                e.run("setLink", json!({ "href": href }));
-            }
-        });
+        let typed = link_text.get_untracked();
+        let text = if typed.trim().is_empty() {
+            if from == to { link.get_untracked().trim().to_string() } else { link_was.get() }
+        } else {
+            typed
+        };
+        let text = (text != link_was.get() || from == to).then_some(text);
+        ctx.editor.with_untracked(|e| e.run_command(&crate::blocks::set_link(from, to, text, href)));
         ctx.editing_link.set(false);
         ctx.changed();
+        ctx.editor.with_untracked(|e| e.session.focus());
     };
     dynamic(move || {
         if !visible() {
@@ -626,32 +700,67 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
             .bg(move || theme().popover)
             .shadow_lg();
         if ctx.editing_link.get() {
+            let field = |placeholder: &'static str, value: Signal<String>, focus: bool| {
+                nsh_core::element::input()
+                    .h(px(28.0))
+                    .px_2()
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(move || theme().border)
+                    .text_size(px(13.0))
+                    // Its own colour: inside a note it would take the note's.
+                    .text_color(move || theme().popover_foreground)
+                    .placeholder(placeholder)
+                    .auto_focus(focus)
+                    .value(move || value.get())
+                    .on_change(move |t: &str| value.set(t.to_string()))
+                    .on_submit(move |_: &str| apply_link())
+            };
+            let new = untracked(|| !had_link.get());
+            let mut buttons = view().flex_row().justify_end().gap(px(2.0));
+            if !new {
+                buttons = buttons.child(button("Remove link", "Remove link", || false, || true, move || {
+                    link.set(String::new());
+                    link_text.set(String::new());
+                    apply_link();
+                }));
+            }
+            buttons = buttons
+                .child(button(if new { "Insert" } else { "Apply" }, if new { "Insert link" } else { "Apply link" }, || false, || true, apply_link))
+                .child(button("✕", "Cancel", || false, || true, move || ctx.editing_link.set(false)));
+            // A new link's address first: its text is optional.
+            let text_field = field(if new { "Text to show (optional)" } else { "Text" }, link_text, new);
+            let address = field("Paste or type a link…", link, !new);
+            return Some(surface.w(px(320.0_f32.min(fit))).child(text_field).child(address).child(buttons).into_element());
+        }
+        // Table cells selected: what goes on cells.
+        if ctx.selection.with(|s| s.as_ref().is_some_and(|s| s.kind == "cell")) {
+            let run = move |name: &'static str| {
+                move || {
+                    ctx.editor.with_untracked(|e| e.run(name, json!({})));
+                    ctx.changed();
+                }
+            };
+            let can = move |name: &'static str| {
+                move || {
+                    ctx.revision.get();
+                    ctx.editor.with(|e| e.can(name, &json!({})))
+                }
+            };
+            let cell_color = move || {
+                let mut items = vec![MenuItem::new("None").on_select(move || set_cell_color(ctx, None)), MenuItem::separator()];
+                items.extend(actions::COLORS.iter().map(|(name, css)| MenuItem::new(*name).on_select(move || set_cell_color(ctx, Some(css)))));
+                let _ = popup_menu(items);
+            };
             return Some(
                 surface
                     .flex_row()
                     .items_center()
-                    .w(px(380.0_f32.min(fit)))
-                    .child(
-                        nsh_core::element::input()
-                            .flex_1()
-                            .h(px(28.0))
-                            .px_2()
-                            .rounded(px(6.0))
-                            .border_1()
-                            .border_color(move || theme().border)
-                            .text_size(px(13.0))
-                            .placeholder("Paste or type a link…")
-                            .auto_focus(true)
-                            .value(move || link.get())
-                            .on_change(move |t: &str| link.set(t.to_string()))
-                            .on_submit(move |_: &str| apply_link()),
-                    )
-                    .child(button("Apply", "Apply link", || false, || true, apply_link))
-                    .child(button("Remove", "Remove link", || false, move || ctx.is_active(actions::get("link")), move || {
-                        link.set(String::new());
-                        apply_link();
-                    }))
-                    .child(button("✕", "Cancel", || false, || true, move || ctx.editing_link.set(false)))
+                    .gap(px(2.0))
+                    .child(button("Merge cells", "Merge the selected cells", || false, can("mergeCells"), run("mergeCells")))
+                    .child(button("Split cell", "Split a merged cell", || false, can("splitCell"), run("splitCell")))
+                    .child(separator())
+                    .child(button("Cell color ▾", "Color the selected cells", || false, || true, cell_color))
                     .into_element(),
             );
         }
@@ -661,8 +770,17 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
                 row = row.child(separator());
             }
             row = row.children(group.iter().map(|id| action_button(ctx, id).into_element()));
+            if i == 0 {
+                row = row.child(separator()).child(list_button(ctx));
+            }
         }
-        row = row.child(separator()).child(button("…", "More", move || more.get(), || true, move || more.update(|m| *m = !*m)));
+        row = row
+            .child(separator())
+            .child(color_button(ctx, move || more.set(false)))
+            .child(button("…", "More", move || more.get(), || true, move || {
+                ctx.color_panel.set(ColorPanel::Closed);
+                more.update(|m| *m = !*m);
+            }));
         let section = |title: &'static str, ids: &'static [&'static str]| {
             view()
                 .child(
@@ -697,8 +815,215 @@ pub fn selection_menu(ctx: Ctx) -> impl IntoElement {
                     .child(section("Insert", actions::SELECTION_MORE_INSERT))
                     .child(section("Format", actions::SELECTION_MORE_FORMAT)),
             );
-        Some(surface.child(row).child(more_panel).into_element())
+        Some(surface.child(row).child(more_panel).child(color_panel(ctx, room)).into_element())
     })
+}
+
+/// The selection menu's list button: the list the selection is in (a
+/// bullet when none) and a ▾; it opens a menu of the lists, the current one
+/// checked.
+fn list_button(ctx: Ctx) -> impl IntoElement {
+    let current = move || actions::LISTS.iter().map(|id| actions::get(id)).find(|a| ctx.is_active(a));
+    view()
+        .flex_row()
+        .h(px(28.0))
+        .px(px(6.0))
+        .gap(px(3.0))
+        .items_center()
+        .justify_center()
+        .rounded(px(6.0))
+        .bg(move || if current().is_some() { tint(0.12) } else { tint(0.0) })
+        .hover(|s| s.bg(tint(0.07)))
+        .active(|s| s.opacity(0.6))
+        .label("Lists")
+        .focusable(false)
+        .cursor(Cursor::Pointer)
+        .on_press(move || {
+            let items = actions::LISTS
+                .iter()
+                .map(|id| {
+                    let action = actions::get(id);
+                    MenuItem::new(action.label).checked(untracked(|| ctx.is_active(action))).on_select(move || ctx.perform(action))
+                })
+                .collect();
+            let _ = popup_menu(items);
+        })
+        .child(hinted(
+            hint("Lists", ""),
+            view()
+                .flex_row()
+                .items_center()
+                .gap(px(3.0))
+                .child(text(move || current().map_or("•", |a| a.glyph)).text_size(px(13.0)).text_color(move || theme().popover_foreground))
+                .child(text("▾").text_size(px(9.0)).text_color(move || theme().muted_foreground)),
+        ))
+}
+
+/// The selection menu's text color button: an "A" over a bar of the
+/// current color; it opens and closes the colors panel.
+fn color_button(ctx: Ctx, opened: impl Fn() + 'static) -> impl IntoElement {
+    let bar = move || -> AdaptiveColor {
+        match current_color(ctx).and_then(|c| actions::color_rgb(&c)) {
+            Some(rgb) => nsh_core::color::rgb(rgb).into(),
+            None => theme().popover_foreground,
+        }
+    };
+    view()
+        .w(px(28.0))
+        .h(px(28.0))
+        .items_center()
+        .justify_center()
+        .rounded(px(6.0))
+        .bg(move || if ctx.color_panel.get() != ColorPanel::Closed { tint(0.12) } else { tint(0.0) })
+        .hover(|s| s.bg(tint(0.07)))
+        .active(|s| s.opacity(0.6))
+        .label("Text color")
+        .focusable(false)
+        .cursor(Cursor::Pointer)
+        .on_press(move || {
+            opened();
+            ctx.color_panel.update(|p| *p = if *p == ColorPanel::Closed { ColorPanel::Named } else { ColorPanel::Closed });
+        })
+        .child(hinted(
+            hint("Text color", ""),
+            view()
+                .items_center()
+                .child(text("A").text_size(px(13.0)).text_color(move || theme().popover_foreground))
+                .child(view().w(px(14.0)).h(px(3.0)).rounded(px(1.5)).bg(bar)),
+        ))
+}
+
+/// The selection menu's colors: the default, the named colors and a "+"
+/// for any color, which shows the picker under them. A picked color goes
+/// on the selection at once.
+fn color_panel(ctx: Ctx, room: f32) -> impl IntoElement {
+    // What the colors go on: the text (`color`) or behind it
+    // (`backgroundColor`).
+    let target = signal("color");
+    let dot = move |label: &'static str, css: Option<&'static str>| {
+        let rgb = css.and_then(actions::color_rgb);
+        let chosen = move || current_style(ctx, target.get()).as_deref() == css;
+        view()
+            .w(px(22.0))
+            .h(px(22.0))
+            .rounded_full()
+            .items_center()
+            .justify_center()
+            .border_2()
+            .border_color(move || if chosen() { theme().popover_foreground } else { tint(0.18) })
+            .bg(move || -> AdaptiveColor {
+                match rgb {
+                    Some(rgb) => nsh_core::color::rgb(rgb).into(),
+                    None => theme().background,
+                }
+            })
+            .hover(|s| s.scale(1.12))
+            .label(label)
+            .focusable(false)
+            .cursor(Cursor::Pointer)
+            .on_press(move || set_style(ctx, target.get_untracked(), css))
+            .child(hinted(hint(label, ""), text(if rgb.is_none() { "A" } else { "" }).text_size(px(10.0)).text_color(move || theme().foreground)))
+            .into_element()
+    };
+    let custom = view()
+        .w(px(22.0))
+        .h(px(22.0))
+        .rounded_full()
+        .items_center()
+        .justify_center()
+        .border_2()
+        .border_color(move || if ctx.color_panel.get() == ColorPanel::Custom { theme().popover_foreground } else { tint(0.18) })
+        .hover(|s| s.scale(1.12))
+        .label("Custom color")
+        .focusable(false)
+        .cursor(Cursor::Pointer)
+        .on_press(move || ctx.color_panel.update(|p| *p = if *p == ColorPanel::Custom { ColorPanel::Named } else { ColorPanel::Custom }))
+        .child(hinted(hint("Custom color", ""), text("+").text_size(px(14.0)).text_color(move || theme().popover_foreground)));
+    let picked = move || current_style(ctx, target.get()).and_then(|c| actions::color_rgb(&c)).unwrap_or(0);
+    let picker = move || {
+        nsh_base::color_picker()
+            .value(move || Some(Hsla::from(nsh_core::color::rgb(picked()))))
+            .on_change(move |e: &nsh_base::ColorPickerEvent| {
+                if let nsh_base::ColorPickerEvent::Change(c, _) = e {
+                    let rgb = nsh_core::Color::from(*c).0 >> 8;
+                    set_style(ctx, target.get_untracked(), Some(&format!("#{rgb:06x}")));
+                }
+            })
+            .gap(px(8.0))
+            .pt(px(6.0))
+            .child(
+                nsh_base::color_area()
+                    .accessibility_label("Saturation and brightness")
+                    .w(px(228.0))
+                    .h(px(100.0))
+                    .rounded(px(8.0))
+                    .thumb_class("size-3.5 rounded-full border-2 border-white shadow-md"),
+            )
+            .child(
+                nsh_base::color_slider()
+                    .color_space(nsh_base::ColorSpace::Hsb)
+                    .channel(nsh_base::ColorChannel::Hue)
+                    .accessibility_label("Hue")
+                    .w(px(228.0))
+                    .h(px(16.0))
+                    .justify_center()
+                    .track_class("h-3 rounded-full")
+                    .thumb_class("size-3.5 rounded-full border-2 border-white shadow-md"),
+            )
+            .child(
+                nsh_base::color_field()
+                    .accessibility_label("Hex color")
+                    .w(px(228.0))
+                    .h(px(28.0))
+                    .px_2()
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(move || theme().border)
+                    .text_size(px(12.0))
+                    .text_color(move || theme().popover_foreground),
+            )
+    };
+    view()
+        .style_when(move || ctx.color_panel.get() == ColorPanel::Closed, |s| s.hidden())
+        .border_t_1()
+        .border_color(move || theme().border)
+        .pt(px(6.0))
+        // The menu can't be drawn outside its window: in a short note the
+        // panel scrolls.
+        .child(
+            scroll().max_h(px(room)).child(
+                view()
+                    .px(px(6.0))
+                    .pb(px(6.0))
+                    .gap(px(6.0))
+                    .child(
+                        view()
+                            .flex_row()
+                            .gap(px(2.0))
+                            .child(button("Text", "Color the text", move || target.get() == "color", || true, move || target.set("color")))
+                            .child(button("Highlight", "Color behind the text", move || target.get() == "backgroundColor", || true, move || {
+                                target.set("backgroundColor")
+                            })),
+                    )
+                    .child(
+                        view()
+                            .flex_row()
+                            .flex_wrap()
+                            .gap(px(6.0))
+                            .max_w(px(232.0))
+                            .child(dot("Default", None))
+                            .children(actions::COLORS.iter().map(move |(name, css)| dot(name, Some(css))))
+                            .child(custom),
+                    )
+                    .child(dynamic(move || (ctx.color_panel.get() == ColorPanel::Custom).then(picker))),
+            ),
+        )
+}
+
+/// Colors the selected cells (`None`: no color).
+fn set_cell_color(ctx: Ctx, css: Option<&'static str>) {
+    ctx.editor.with_untracked(|e| e.run("setCellAttribute", json!({ "name": "background", "value": css })));
+    ctx.changed();
 }
 
 /// A link as typed: `example.com` gets `https://`; a scheme or an anchor
@@ -815,6 +1140,9 @@ pub fn editor_classes(look: &TextLook) -> RichEditorClasses {
         ("table", format!("border border-{line} rounded")),
         ("tableHeader", format!("font-semibold bg-{fill} px-3 py-1.5 border border-{line}")),
         ("tableCell", format!("px-3 py-1.5 border border-{line}")),
+        // A cell's own color, see-through like a highlight.
+        ("tableCell[background=*]", "bg-[{}]/30".into()),
+        ("tableHeader[background=*]", "bg-[{}]/30".into()),
         // Alignment is an attribute of paragraphs and headings.
         ("paragraph[textAlign=center]", "text-center".into()),
         ("paragraph[textAlign=right]", "text-right".into()),
@@ -836,8 +1164,16 @@ pub fn editor_classes(look: &TextLook) -> RichEditorClasses {
         ("subscript".into(), "text-xs".into()),
         ("superscript".into(), "text-xs".into()),
     ];
-    // Text color is `textStyle`'s `color`: a class per catalog color.
-    let colors = actions::COLORS.iter().map(|(css, class, _)| (format!("textStyle[color={css}]"), class.to_string()));
+    // Text color is `textStyle`'s `color`: any color, drawn as it is.
+    let colors = [
+        ("textStyle[color=*]", "text-[color:{}]"),
+        // A highlight color, see-through so the text reads on it.
+        ("textStyle[backgroundColor=*]", "bg-[{}]/40 rounded-sm"),
+        ("textStyle[fontSize=*]", "text-[length:{}]"),
+        ("textStyle[fontFamily=*]", "font-[family-name:'{}']"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()));
     classes.marks = Some(marks.into_iter().chain(colors).collect());
     classes
 }

@@ -797,8 +797,21 @@ fn status_line(app: App, ctx: ui::Ctx, note: Note) -> impl IntoElement {
         .child(
             text(move || {
                 app.revision.get();
-                let words = words_note.plain_text().split_whitespace().count();
-                if words == 1 { "1 word".to_string() } else { format!("{words} words") }
+                let all = words_note.plain_text();
+                let words = all.split_whitespace().count();
+                let chars = all.chars().filter(|c| !c.is_control()).count();
+                let plural = |n: usize, one: &str, many: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {many}") };
+                // With text selected: its words of the note's.
+                let selected = ctx.selection.with(|s| s.as_ref().filter(|s| !s.empty).map(|s| (s.from as usize, s.to as usize)));
+                match selected.and_then(|(from, to)| {
+                    ctx.editor.with_untracked(|e| {
+                        let doc = e.doc();
+                        (to <= doc.content().size()).then(|| doc.text_between(from, to, Some(" "), None))
+                    })
+                }) {
+                    Some(part) => format!("{} of {}", part.split_whitespace().count(), plural(words, "word", "words")),
+                    None => format!("{} · {}", plural(words, "word", "words"), plural(chars, "character", "characters")),
+                }
             })
             .text_size(px(12.0))
             .text_color(move || theme().muted_foreground),

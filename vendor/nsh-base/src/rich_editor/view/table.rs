@@ -25,7 +25,11 @@ use crate::{
         state::{Selection, TextSelection},
         tables::{
             Axis, CellSelection, TableMap, TableRole, cell_around, column_widths,
-            commands::{move_table_column, move_table_row, set_column_width, set_row_height},
+            commands::{
+                HeaderKind, add_column_after, add_column_before, add_row_after, add_row_before,
+                delete_column, delete_row, delete_table, move_table_column, move_table_row,
+                set_column_width, set_row_height, toggle_header,
+            },
             find_table, is_cell, is_table, next_cell, table_role,
         },
     },
@@ -157,7 +161,10 @@ pub(crate) fn column_tracks(table: &Node, preview: Option<(usize, Points)>) -> S
                 _ => width,
             };
             match width {
-                Some(w) => track_px(w.max(min)),
+                // BUBBLENOTES PATCH: a set width is the most a column
+                // takes: in a narrower editor it shrinks (to `min`), so
+                // the table fits rather than running past the edge.
+                Some(w) => format!("minmax({},{})", track_px(min), track_px(w.max(min))),
                 None => format!("minmax({},1fr)", track_px(min)),
             }
         })
@@ -836,11 +843,74 @@ impl Rv {
                 },
                 _,
             ) if to != from => Some(move_table_row(Some(table), from, to, true)),
+            // BUBBLENOTES PATCH: a grip pressed and let go without moving:
+            // the menu of its column or row.
+            (TableDrag::MoveCol { table, from, to: None, .. }, _) => {
+                self.line_menu(table, true, from);
+                None
+            }
+            (TableDrag::MoveRow { table, from, to: None, .. }, _) => {
+                self.line_menu(table, false, from);
+                None
+            }
             _ => None,
         };
         if let Some(command) = command {
             self.run_command(&command);
         }
+    }
+
+    /// BUBBLENOTES PATCH: the menu of a column (`column`) or row of the
+    /// table at `table` (its cells are selected): add one before or after,
+    /// delete it, the header, delete the table.
+    fn line_menu(&self, table: usize, column: bool, index: usize) {
+        if !self.editable() {
+            return;
+        }
+        use nsh_core::element::desktop::{MenuItem, popup_menu};
+        let run = |command: fn() -> BoxCommand| {
+            let rv = self.clone();
+            move || {
+                rv.run_command(&command());
+            }
+        };
+        let header = {
+            let rv = self.clone();
+            move || {
+                rv.run_command(&toggle_header(if column { HeaderKind::Column } else { HeaderKind::Row }));
+            }
+        };
+        let is_header = self
+            .session
+            .state()
+            .doc()
+            .node_at(table)
+            .and_then(|t| t.maybe_child(0).and_then(|r| r.maybe_child(0)).map(|c| c.ty().name() == "tableHeader"))
+            .unwrap_or(false);
+        let mut items = if column {
+            vec![
+                MenuItem::new("Insert column left").on_select(run(add_column_before)),
+                MenuItem::new("Insert column right").on_select(run(add_column_after)),
+                MenuItem::new("Delete column").on_select(run(delete_column)),
+            ]
+        } else {
+            vec![
+                MenuItem::new("Insert row above").on_select(run(add_row_before)),
+                MenuItem::new("Insert row below").on_select(run(add_row_after)),
+                MenuItem::new("Delete row").on_select(run(delete_row)),
+            ]
+        };
+        if index == 0 {
+            items.push(MenuItem::separator());
+            items.push(
+                MenuItem::new(if column { "Header column" } else { "Header row" })
+                    .checked(is_header)
+                    .on_select(header),
+            );
+        }
+        items.push(MenuItem::separator());
+        items.push(MenuItem::new("Delete table").on_select(run(delete_table)));
+        let _ = popup_menu(items);
     }
 
     /// Runs `command` on the session's state, dispatching what it does.
@@ -1024,8 +1094,8 @@ mod tests {
             )
             .unwrap();
         let t = table(vec![row, tr(vec![td("c"), td("d")])]);
-        assert_eq!(column_tracks(&t, None), "120px minmax(25px,1fr)");
-        assert_eq!(column_tracks(&t, Some((1, px(10.0)))), "120px 25px");
+        assert_eq!(column_tracks(&t, None), "minmax(25px,120px) minmax(25px,1fr)");
+        assert_eq!(column_tracks(&t, Some((1, px(10.0)))), "minmax(25px,120px) minmax(25px,25px)");
         assert_eq!(row_tracks(&t, None), "minmax(40px,auto) auto");
         assert_eq!(
             row_tracks(&t, Some((1, px(30.0)))),

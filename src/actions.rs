@@ -5,6 +5,7 @@
 use nsh_base::rich_editor::commands::BoxCommand;
 use serde_json::{Value, json};
 
+use crate::blocks;
 use crate::editor_view::media;
 use crate::kit::Editor;
 use crate::toggle;
@@ -28,6 +29,14 @@ pub enum Run {
 pub enum AppAction {
     InsertImage,
     EditLink,
+    /// Pastes the clipboard's text without its formatting.
+    PastePlain,
+    /// Opens the link editor at the caret, for linked text to put in.
+    InsertLink,
+    /// A menu of text sizes for the selection.
+    TextSize,
+    /// A menu of fonts for the selection.
+    Font,
 }
 
 /// A node or mark name, and the attributes it must have (when they matter).
@@ -95,6 +104,19 @@ pub const ACTIONS: &[Action] = &[
     Action { id: "align-left", label: "Align left", glyph: "↤", hint: "Ctrl/⌘+Shift+L", keywords: &[], run: cmd!("setTextAlign", json!("left")), active: Some(("paragraph", || Some(json!({ "textAlign": "left" })))) },
     Action { id: "align-center", label: "Center", glyph: "↔", hint: "Ctrl/⌘+Shift+E", keywords: &[], run: cmd!("setTextAlign", json!("center")), active: Some(("paragraph", || Some(json!({ "textAlign": "center" })))) },
     Action { id: "align-right", label: "Align right", glyph: "↦", hint: "Ctrl/⌘+Shift+R", keywords: &[], run: cmd!("setTextAlign", json!("right")), active: Some(("paragraph", || Some(json!({ "textAlign": "right" })))) },
+    // Text style menus.
+    Action { id: "text-size", label: "Text size", glyph: "↕", hint: "Small, normal, large, huge", keywords: &["size", "small", "large", "big", "huge"], run: Run::App(AppAction::TextSize), active: None },
+    Action { id: "font", label: "Font", glyph: "Aa", hint: "Serif, monospace, handwriting", keywords: &["font", "serif", "mono", "typeface"], run: Run::App(AppAction::Font), active: None },
+    // Text put in.
+    Action { id: "link-insert", label: "Link", glyph: "🔗", hint: "Text that links to an address", keywords: &["link", "url", "href", "web"], run: Run::App(AppAction::InsertLink), active: None },
+    Action { id: "date", label: "Today's date", glyph: "📅", hint: "Today's date at the caret", keywords: &["date", "today", "day"], run: Run::Make(blocks::insert_date), active: None },
+    Action { id: "time", label: "Current time", glyph: "🕒", hint: "The time now at the caret", keywords: &["time", "now", "clock"], run: Run::Make(blocks::insert_time), active: None },
+    Action { id: "paste-plain", label: "Paste as plain text", glyph: "📋", hint: "Without its formatting", keywords: &["paste", "plain", "unformatted", "clipboard"], run: Run::App(AppAction::PastePlain), active: None },
+    // The block at the caret.
+    Action { id: "move-up", label: "Move up", glyph: "↑", hint: "Swap with the block above", keywords: &["move", "up", "block"], run: Run::Make(blocks::move_up), active: None },
+    Action { id: "move-down", label: "Move down", glyph: "↓", hint: "Swap with the block below", keywords: &["move", "down", "block"], run: Run::Make(blocks::move_down), active: None },
+    Action { id: "duplicate", label: "Duplicate block", glyph: "⧉", hint: "A copy below it", keywords: &["duplicate", "copy", "clone", "block"], run: Run::Make(blocks::duplicate), active: None },
+    Action { id: "delete-block", label: "Delete block", glyph: "🗑", hint: "Remove the whole block", keywords: &["delete", "remove", "block"], run: Run::Make(blocks::delete), active: None },
 ];
 
 /// Where each action appears.
@@ -107,19 +129,66 @@ pub const TOOLBAR: &[&[&str]] = &[
     &["align-left", "align-center", "align-right", "clear"],
 ];
 pub const SLASH: &[&str] =
-    &["text", "h1", "h2", "h3", "bullet", "numbered", "todo", "toggle", "quote", "codeblock", "table", "image", "youtube", "divider"];
+    &[
+        "text", "h1", "h2", "h3", "bullet", "numbered", "todo", "toggle", "quote", "codeblock", "table", "image", "youtube", "divider",
+        "bold", "italic", "underline", "strike", "highlight", "code", "subscript", "superscript", "clear",
+        "link-insert", "align-left", "align-center", "align-right",
+        "date", "time", "paste-plain",
+        "move-up", "move-down", "duplicate", "delete-block",
+    ];
 pub const SELECTION: &[&[&str]] =
-    &[&["bullet", "numbered", "todo", "toggle"], &["bold", "italic", "underline", "strike"], &["outdent", "indent"], &["link"]];
+    &[&["bold", "italic", "underline", "strike"], &["outdent", "indent"], &["link"]];
+/// The lists, one button in the selection menu (after its first group)
+/// that opens a menu of them.
+pub const LISTS: &[&str] = &["bullet", "numbered", "todo", "toggle"];
 pub const SELECTION_MORE_INSERT: &[&str] = &["table", "image", "youtube", "divider", "codeblock", "quote"];
-pub const SELECTION_MORE_FORMAT: &[&str] = &["code", "highlight", "clear"];
+pub const SELECTION_MORE_FORMAT: &[&str] = &["text-size", "font", "code", "highlight", "clear"];
 
-/// The text colors: a CSS color for the document, and the class the editor
-/// draws it with.
-pub const COLORS: &[(&str, &str, u32)] = &[
-    ("#dc2626", "text-red-600", 0xdc2626),
-    ("#2563eb", "text-blue-600", 0x2563eb),
-    ("#16a34a", "text-green-600", 0x16a34a),
+/// The named text colors: a name and the CSS color the document keeps.
+/// Any other color can be picked too (the editor draws any `#rrggbb`).
+pub const COLORS: &[(&str, &str)] = &[
+    ("Black", "#000000"),
+    ("Gray", "#6b7280"),
+    ("White", "#ffffff"),
+    ("Red", "#dc2626"),
+    ("Orange", "#ea580c"),
+    ("Yellow", "#ca8a04"),
+    ("Green", "#16a34a"),
+    ("Teal", "#0d9488"),
+    ("Blue", "#2563eb"),
+    ("Purple", "#9333ea"),
+    ("Pink", "#db2777"),
+    ("Brown", "#92400e"),
 ];
+
+/// The text sizes: a name and the CSS size (`None`: the note's own).
+pub const SIZES: &[(&str, Option<&str>)] =
+    &[("Small", Some("12px")), ("Normal", None), ("Large", Some("20px")), ("Huge", Some("28px"))];
+
+/// The fonts: a name and the CSS family (`None`: the note's own).
+pub const FONTS: &[(&str, Option<&str>)] =
+    &[("Default", None), ("Serif", Some("Georgia")), ("Monospace", Some("Consolas")), ("Handwriting", Some("Segoe Print"))];
+
+/// Sets one of the text style's attributes at the selection (`color`,
+/// `backgroundColor`, `fontSize`, `fontFamily`; `None` takes it off),
+/// keeping the others; a text style left with none goes.
+pub fn set_style(editor: &Editor, key: &str, value: Option<&str>) {
+    editor.run("setTextStyle", json!({ key: value }));
+    if editor.attributes("textStyle").values().all(Value::is_null) {
+        editor.run("unsetTextStyle", json!({}));
+    }
+}
+
+/// One of the text style's attributes at the selection.
+pub fn style_of(editor: &Editor, key: &str) -> Option<String> {
+    editor.attributes("textStyle").get(key).and_then(|v| v.as_str().map(str::to_owned))
+}
+
+/// A CSS `#rrggbb` color as a number.
+pub fn color_rgb(css: &str) -> Option<u32> {
+    let hex = css.strip_prefix('#')?;
+    (hex.len() == 6).then(|| u32::from_str_radix(hex, 16).ok()).flatten()
+}
 
 pub fn get(id: &str) -> &'static Action {
     ACTIONS.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("no action {id:?}"))
@@ -141,6 +210,8 @@ impl Action {
             Run::ClearFormatting => {
                 editor.run("unsetAllMarks", json!({}));
                 editor.run("clearNodes", json!({}));
+                // With only a caret, what's typed next is plain too.
+                editor.run_command(&blocks::no_stored_marks());
             }
             Run::App(action) => app(*action),
         }
@@ -200,6 +271,7 @@ mod tests {
             .iter()
             .copied()
             .chain(SELECTION.iter().copied())
+            .chain([LISTS])
             .chain([SLASH, SELECTION_MORE_INSERT, SELECTION_MORE_FORMAT])
             .collect();
         for list in lists {

@@ -50,16 +50,14 @@ pub fn ctx_for(app: App, note: &Note) -> Ctx {
     OWNED.with(|o| o.borrow_mut().push(Owned { selection, app, note: note.clone() }));
     cleanup(move || OWNED.with(|o| o.borrow_mut().retain(|o| o.selection != selection)));
     let edit_link = move || {
-        // A caret in a link edits the whole link; with nothing selected
-        // there's nothing to link.
+        // In a link (a caret or part of it) the whole link is edited; with
+        // nothing selected, new linked text is put in.
         editor.with_untracked(|e| {
-            if e.state().selection().empty() && e.is_active("link", None) {
-                e.run("extendMarkRange", json!({ "typeOrName": "link" }));
+            if e.is_active("link", None) {
+                e.run("extendMarkRange", json!({ "name": "link" }));
             }
         });
-        if !editor.with_untracked(|e| e.state().selection().empty()) {
-            editing_link.set(true);
-        }
+        editing_link.set(true);
     };
     let owner = app.owner;
     let insert_image = move || {
@@ -74,11 +72,48 @@ pub fn ctx_for(app: App, note: &Note) -> Ctx {
             });
         });
     };
+    let revision = app.revision;
+    let paste_plain = move || {
+        owner.run(|| {
+            let _ = spawn(async move {
+                let text = clipboard_string().await;
+                if text.is_empty() {
+                    return;
+                }
+                let pasted = editor.with_untracked(|e| e.run_command(&crate::blocks::paste_text(&text)));
+                if pasted {
+                    revision.update(|r| *r += 1);
+                }
+            });
+        });
+    };
     let actions: Rc<dyn Fn(AppAction)> = Rc::new(move |action| match action {
         AppAction::InsertImage => insert_image(),
         AppAction::EditLink => edit_link(),
+        AppAction::PastePlain => paste_plain(),
+        // With a caret, the link editor also asks for the text.
+        AppAction::InsertLink => edit_link(),
+        AppAction::TextSize => style_menu(editor, revision, "fontSize", crate::actions::SIZES),
+        AppAction::Font => style_menu(editor, revision, "fontFamily", crate::actions::FONTS),
     });
-    Ctx { editor, read_only: signal(false), revision: app.revision, selection, status, editing_link, app: stored(actions) }
+    let color_panel = signal(ui::ColorPanel::Closed);
+    Ctx { editor, read_only: signal(false), revision: app.revision, selection, status, editing_link, color_panel, app: stored(actions) }
+}
+
+/// A native menu of `choices` for the text style's `key` at the selection,
+/// the current one checked.
+fn style_menu(editor: Signal<crate::kit::Editor>, revision: Signal<u64>, key: &'static str, choices: &'static [(&'static str, Option<&'static str>)]) {
+    let current = editor.with_untracked(|e| crate::actions::style_of(e, key));
+    let items = choices
+        .iter()
+        .map(|(name, value)| {
+            nsh_core::element::desktop::MenuItem::new(*name).checked(current.as_deref() == *value).on_select(move || {
+                editor.with_untracked(|e| crate::actions::set_style(e, key, *value));
+                revision.update(|r| *r += 1);
+            })
+        })
+        .collect();
+    let _ = nsh_core::element::desktop::popup_menu(items);
 }
 
 /// Inserts the images among pasted or dropped files at the selection:
@@ -226,7 +261,8 @@ pub fn note_editor(
                 .pointer_events(PointerEvents::BoxNone)
                 .child(ui::slash_menu(ctx, window_height))
                 .child(crate::due::menu(ctx, window_height))
-                .children(owned(ctx).map(|o| crate::links::menu(ctx, o.app, window_height).into_element())),
+                .children(owned(ctx).map(|o| crate::links::menu(ctx, o.app, window_height).into_element()))
+                .child(crate::emoji::menu(ctx, window_height)),
         )
 }
 

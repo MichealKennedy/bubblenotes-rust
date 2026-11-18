@@ -319,10 +319,28 @@ fn lookup(map: Option<&BTreeMap<String, String>>, name: &str, attrs: &Attrs) -> 
     let Some(map) = map else {
         return Vec::new();
     };
-    part_names(name, attrs)
+    let mut classes: Vec<String> = part_names(name, attrs)
         .iter()
         .filter_map(|n| map.get(n).cloned())
-        .collect()
+        .collect();
+    // BUBBLENOTES PATCH: `name[key=*]` is for any value of `key` with no
+    // class of its own, `{}` in its classes standing for the value (a text
+    // color picked freely: `textStyle[color=*]` → `text-[color:{}]`).
+    for (key, value) in attrs {
+        let Value::String(value) = value else { continue };
+        if value.is_empty() || map.contains_key(&format!("{name}[{key}={value}]")) {
+            continue;
+        }
+        // Only a plain value goes into a class (no brackets, quotes or
+        // semicolons); a space is written `_`, as classes write it.
+        if !value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '#' | '.' | '-' | ' ')) {
+            continue;
+        }
+        if let Some(template) = map.get(&format!("{name}[{key}=*]")) {
+            classes.push(template.replace("{}", &value.replace(' ', "_")));
+        }
+    }
+    classes
 }
 
 /// The styles of a node's part, in order.
